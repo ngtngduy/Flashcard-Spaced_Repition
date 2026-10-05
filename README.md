@@ -8,7 +8,7 @@
 
 ## 📌 BÁO CÁO BÀI TẬP NHÓM - TUẦN 1
 
-### CÂU 1: CHỌN ĐỀ TÀI, LÊN Ý TƯỞNG, NGHIÊN CỨU VÀ PHÂN TÍCH
+CHỌN ĐỀ TÀI, LÊN Ý TƯỞNG, NGHIÊN CỨU VÀ PHÂN TÍCH
 
 #### 1. Ý tưởng cốt lõi (Ideation)
 * **Vấn đề:** Người học thường gặp hiện tượng "đường cong quên lãng". Kiến thức mới sẽ rơi rụng 70-80% sau vài ngày nếu không ôn tập đúng cách.
