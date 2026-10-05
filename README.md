@@ -1,5 +1,3 @@
-# Flashcard-Spaced_Repition
-
 # Memora - Spaced Repetition Flashcard App
 
 Ứng dụng học tập thông minh sử dụng phương pháp lặp lại ngắt quãng (Spaced Repetition) trên nền tảng Android (Kotlin). Bài tập lớn môn học - Đại học Giao thông Vận tải TP.HCM (UTH).
