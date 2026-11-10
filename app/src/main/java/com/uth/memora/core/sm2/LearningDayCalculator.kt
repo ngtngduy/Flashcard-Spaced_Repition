@@ -42,7 +42,7 @@ object LearningDayCalculator {
         zoneId: ZoneId = ZoneId.systemDefault()
     ): TimeCheckResult {
         val isRolledBack = lastReviewedAtMillis != null && deviceNowMillis < lastReviewedAtMillis
-        val safeMillis = if (isRolledBack) lastReviewedAtMillis!! else deviceNowMillis
+        val safeMillis = maxOf(deviceNowMillis, lastReviewedAtMillis ?: deviceNowMillis)
         return TimeCheckResult(
             effectiveTimeMillis = safeMillis,
             learningDayEpoch = toLearningDay(safeMillis, zoneId),

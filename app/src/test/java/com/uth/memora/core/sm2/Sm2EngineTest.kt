@@ -1,6 +1,7 @@
 package com.uth.memora.core.sm2
 
 import com.uth.memora.core.domain.SentenceLocalValidator
+import com.uth.memora.core.domain.VietnameseTextNormalizer
 import com.uth.memora.core.model.Card
 import com.uth.memora.core.model.CardState
 import com.uth.memora.core.model.RetentionStage
@@ -9,6 +10,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 class Sm2EngineTest {
 
@@ -65,7 +68,49 @@ class Sm2EngineTest {
     }
 
     @Test
-    fun `test sentence local validator rules`() {
+    fun `test lapse on graduated review card resets interval and increments lapses`() {
+        val reviewCard = Card(
+            id = "c2",
+            deckId = "d1",
+            word = "pragmatic",
+            meaning = "thực tế",
+            state = CardState.REVIEW,
+            easeFactor = 2.5,
+            repetitions = 3,
+            interval = 15,
+            lapses = 0,
+            dueDay = 200L
+        )
+        val result = Sm2Engine.evaluateReview(reviewCard, ReviewQuality.AGAIN, 200L)
+        val lapsed = result.updatedCard
+        assertEquals(CardState.LEARNING, lapsed.state)
+        assertEquals(0, lapsed.repetitions)
+        assertEquals(0, lapsed.interval)
+        assertEquals(1, lapsed.lapses)
+        assertEquals(1.96, lapsed.easeFactor, 0.001)
+        assertEquals(RetentionStage.LEVEL_1_STARTING, lapsed.retentionStage)
+
+        // Kiểm tra hoàn tác (Undo - Mục 9.1)
+        val restored = Sm2Engine.restoreFromSnapshot(lapsed, result.snapshotBeforeReview)
+        assertEquals(CardState.REVIEW, restored.state)
+        assertEquals(15, restored.interval)
+        assertEquals(2.5, restored.easeFactor, 0.001)
+        assertEquals(0, restored.lapses)
+    }
+
+    @Test
+    fun `test learning day 4am boundary`() {
+        val zone = ZoneId.of("Asia/Ho_Chi_Minh")
+        val night359Am = LocalDateTime.of(2026, 11, 10, 3, 59).atZone(zone).toInstant().toEpochMilli()
+        val morning400Am = LocalDateTime.of(2026, 11, 10, 4, 0).atZone(zone).toInstant().toEpochMilli()
+
+        val dayAt359 = LearningDayCalculator.toLearningDay(night359Am, zone)
+        val dayAt400 = LearningDayCalculator.toLearningDay(morning400Am, zone)
+        assertEquals(dayAt359 + 1, dayAt400)
+    }
+
+    @Test
+    fun `test sentence local validator and accent insensitive search`() {
         val valid = SentenceLocalValidator.validate(
             targetWord = "resilient",
             rawSentence = "Children are remarkably resilient in difficult times."
@@ -83,5 +128,8 @@ class Sm2EngineTest {
             rawSentence = "Children are very strong in difficult times."
         )
         assertFalse(missingTarget.isValid)
+
+        assertTrue(VietnameseTextNormalizer.matchesQuery("kiên cường, bền bỉ", "kien cuong"))
+        assertTrue(VietnameseTextNormalizer.matchesQuery("Động từ bất quy tắc", "dong tu"))
     }
 }

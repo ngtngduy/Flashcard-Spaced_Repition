@@ -7,6 +7,7 @@ import com.uth.memora.core.domain.PracticeSentenceRepository
 import com.uth.memora.core.domain.SentenceLocalValidator
 import com.uth.memora.core.domain.StatisticsRepository
 import com.uth.memora.core.domain.StudySessionRepository
+import com.uth.memora.core.domain.VietnameseTextNormalizer
 import com.uth.memora.core.model.Card
 import com.uth.memora.core.model.CardState
 import com.uth.memora.core.model.Deck
@@ -131,11 +132,11 @@ class FakeMemoraRepository(
         _cards.value.firstOrNull { it.id == cardId && !it.isDeleted }
 
     override suspend fun searchCards(deckId: String?, query: String): List<Card> {
-        val q = query.trim().lowercase()
         return _cards.value.filter { card ->
             !card.isDeleted &&
                 (deckId == null || card.deckId == deckId) &&
-                (q.isEmpty() || card.word.lowercase().contains(q) || card.meaning.lowercase().contains(q))
+                (VietnameseTextNormalizer.matchesQuery(card.word, query) ||
+                    VietnameseTextNormalizer.matchesQuery(card.meaning, query))
         }
     }
 
@@ -279,7 +280,10 @@ class FakeMemoraRepository(
 
         val reviewDue = active
             .filter { it.state == CardState.REVIEW && (it.dueDay ?: Long.MAX_VALUE) <= today }
-            .sortedBy { it.dueDay ?: Long.MAX_VALUE }
+            .groupBy { it.dueDay ?: Long.MAX_VALUE }
+            .toSortedMap()
+            .values
+            .flatMap { sameDayCards -> sameDayCards.shuffled() }
 
         return learningDue + reviewDue
     }

@@ -45,6 +45,8 @@ object Sm2Engine {
 
     /**
      * Khôi phục thẻ từ bản chụp khi người học bấm nút Hoàn tác (Mục 9.1).
+     * Lưu ý: Hạn mức thẻ mới giữ nguyên vì thẻ đã từng được hiển thị, nên nếu snapshot.firstSeenDay == null
+     * mà thẻ đã hiển thị hôm nay thì vẫn giữ firstSeenDay hiện tại.
      */
     fun restoreFromSnapshot(
         card: Card,
@@ -59,8 +61,29 @@ object Sm2Engine {
             lapses = snapshot.lapses,
             dueDay = snapshot.dueDay,
             dueAtMillis = snapshot.dueAtMillis,
-            firstSeenDay = snapshot.firstSeenDay,
+            firstSeenDay = snapshot.firstSeenDay ?: card.firstSeenDay,
             lastReviewedAtMillis = snapshot.lastReviewedAtMillis,
+            updatedAtMillis = nowMillis,
+            syncStatus = SyncStatus.PENDING_SYNC
+        )
+    }
+
+    /**
+     * Đánh dấu một Thẻ mới ngay khi lần đầu tiên được hiển thị trong phiên học (Mục 6.5):
+     * - Ghi nhận `firstSeenDay` để tính vào hạn mức thẻ mới trong ngày.
+     * - Chuyển sang `LEARNING` với `dueAtMillis = nowMillis` để nếu người học thoát ứng dụng giữa chừng
+     *   khi chưa kịp bấm nút, thẻ vẫn là Thẻ đang học và đến hạn ở lần mở sau.
+     */
+    fun markCardDisplayedFirstTime(
+        card: Card,
+        currentLearningDay: Long,
+        nowMillis: Long = System.currentTimeMillis()
+    ): Card {
+        if (card.state != CardState.NEW) return card
+        return card.copy(
+            state = CardState.LEARNING,
+            firstSeenDay = card.firstSeenDay ?: currentLearningDay,
+            dueAtMillis = nowMillis,
             updatedAtMillis = nowMillis,
             syncStatus = SyncStatus.PENDING_SYNC
         )
@@ -74,7 +97,6 @@ object Sm2Engine {
         val diff = 5 - quality.q
         val delta = 0.1 - diff * (0.08 + diff * 0.02)
         val rawEf = currentEf + delta
-        // Làm tròn 2 chữ số thập phân để tránh sai số dấu phẩy động
         val roundedEf = (rawEf * 100.0).roundToInt() / 100.0
         return max(Card.MIN_EASE_FACTOR, roundedEf)
     }
@@ -146,6 +168,7 @@ object Sm2Engine {
             ReviewQuality.AGAIN -> {
                 val updated = card.copy(
                     state = CardState.LEARNING,
+                    interval = 0,
                     dueAtMillis = nowMillis + STEP_AGAIN_MINUTES * MILLIS_PER_MINUTE,
                     dueDay = null,
                     firstSeenDay = firstSeenDay,
@@ -164,6 +187,7 @@ object Sm2Engine {
             ReviewQuality.HARD -> {
                 val updated = card.copy(
                     state = CardState.LEARNING,
+                    interval = 0,
                     dueAtMillis = nowMillis + STEP_HARD_MINUTES * MILLIS_PER_MINUTE,
                     dueDay = null,
                     firstSeenDay = firstSeenDay,
@@ -225,7 +249,7 @@ object Sm2Engine {
 
     /**
      * Quy tắc cho Thẻ đã học (REVIEW - Mục 7.4):
-     * - Chưa nhớ (q=1): lapses + 1, EF giảm theo công thức, repetitions = 0, về LEARNING (1 phút).
+     * - Chưa nhớ (q=1): lapses + 1, EF giảm theo công thức, repetitions = 0, interval = 0, về LEARNING (1 phút).
      * - Khó, Nhớ tốt, Dễ (q=3,4,5):
      *   + Tính EF mới trước.
      *   + Nếu repetitions hiện tại == 1: interval mới = 6 ngày (hoặc tính cả số ngày quá hạn nếu ôn trễ).
@@ -247,6 +271,7 @@ object Sm2Engine {
                 state = CardState.LEARNING,
                 easeFactor = newEf,
                 repetitions = 0,
+                interval = 0,
                 lapses = card.lapses + 1,
                 dueAtMillis = nowMillis + STEP_AGAIN_MINUTES * MILLIS_PER_MINUTE,
                 dueDay = null,
@@ -271,8 +296,8 @@ object Sm2Engine {
         }
         val effectiveBaseInterval = max(1, card.interval + overdueDays)
 
-        val rawNextInterval = if (card.repetitions == 1 && overdueDays == 0) {
-            6
+        val rawNextInterval = if (card.repetitions == 1) {
+            if (overdueDays == 0) 6 else max(6, (effectiveBaseInterval * newEf).roundToInt())
         } else {
             (effectiveBaseInterval * newEf).roundToInt()
         }
