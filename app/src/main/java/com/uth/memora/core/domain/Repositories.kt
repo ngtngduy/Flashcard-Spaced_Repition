@@ -58,7 +58,21 @@ interface CardRepository {
     suspend fun softDeleteCard(cardId: String): Result<Unit>
     suspend fun resetCardProgress(cardId: String): Result<Card>
     suspend fun resetDeckProgress(deckId: String): Result<Unit>
+
+    /**
+     * Tự động gợi ý điền nhanh thông tin thẻ mới bằng AI (Mục 6.3 & 11).
+     * Điền: Phiên âm IPA, Loại từ, Nghĩa tiếng Việt và Câu ví dụ.
+     */
+    suspend fun autoFillCardContent(word: String): Result<AutoFillCardData>
 }
+
+data class AutoFillCardData(
+    val word: String,
+    val phonetic: String,
+    val partOfSpeech: PartOfSpeech?,
+    val meaning: String,
+    val example: String
+)
 
 interface StudySessionRepository {
     /**

@@ -25,5 +25,9 @@ data class StudyStatistics(
     /** Phân bố số lượng thẻ theo 6 cấp độ ghi nhớ (Cấp 0 đến Cấp 5) */
     val stageDistribution: Map<RetentionStage, Int> = RetentionStage.entries.associateWith { 0 },
     /** Tỷ lệ nhớ (%) trong 7 ngày gần nhất trên Thẻ đã học */
-    val retentionRatePercent: Float = 0f
+    val retentionRatePercent: Float = 0f,
+    /** Khiên bảo vệ chuỗi ngày học còn khả dụng trong chu kỳ 30 ngày (Mục 10.2 & 11) */
+    val streakFreezeAvailable: Boolean = true,
+    /** Trạng thái chuỗi ngày học đang được khiên bảo vệ trong ngày hôm nay */
+    val isStreakProtectedToday: Boolean = false
 )

@@ -1,6 +1,7 @@
 package com.uth.memora.core.fake
 
 import com.uth.memora.core.domain.AiGradingService
+import com.uth.memora.core.domain.AutoFillCardData
 import com.uth.memora.core.domain.CardRepository
 import com.uth.memora.core.domain.DeckRepository
 import com.uth.memora.core.domain.PracticeSentenceRepository
@@ -255,6 +256,38 @@ class FakeMemoraRepository(
             } else card
         }
         return Result.success(Unit)
+    }
+
+    override suspend fun autoFillCardContent(word: String): Result<AutoFillCardData> {
+        val cleanWord = word.trim().lowercase()
+        if (cleanWord.isEmpty()) {
+            return Result.failure(IllegalArgumentException("Từ vựng không được để trống."))
+        }
+        // Giả lập phản hồi nhanh của AI (Mục 6.3 & 11)
+        val data = when (cleanWord) {
+            "resilient" -> AutoFillCardData(
+                word = "resilient",
+                phonetic = "/rɪˈzɪliənt/",
+                partOfSpeech = PartOfSpeech.ADJECTIVE,
+                meaning = "kiên cường, có khả năng phục hồi nhanh sau khó khăn",
+                example = "Children are remarkably resilient in the face of change."
+            )
+            "procrastinate" -> AutoFillCardData(
+                word = "procrastinate",
+                phonetic = "/prəˈkræstɪneɪt/",
+                partOfSpeech = PartOfSpeech.VERB,
+                meaning = "chần chừ, hoãn lại, để việc đến hạn mới làm",
+                example = "He always procrastinates until the night before the exam."
+            )
+            else -> AutoFillCardData(
+                word = word.trim(),
+                phonetic = "/ˈ${cleanWord.take(5)}.../",
+                partOfSpeech = PartOfSpeech.NOUN,
+                meaning = "nghĩa tiếng Việt mẫu do AI gợi ý cho từ \"$word\"",
+                example = "This is an example sentence demonstrating how to use \"$word\" properly."
+            )
+        }
+        return Result.success(data)
     }
 
     // ---------------- StudySessionRepository ----------------
