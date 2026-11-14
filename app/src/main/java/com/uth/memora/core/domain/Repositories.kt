@@ -7,6 +7,8 @@ import com.uth.memora.core.model.PartOfSpeech
 import com.uth.memora.core.model.PracticeSentence
 import com.uth.memora.core.model.ReviewQuality
 import com.uth.memora.core.model.StudyStatistics
+import com.uth.memora.core.model.ThemeMode
+import com.uth.memora.core.model.UserPreferences
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -153,4 +155,21 @@ interface AiGradingService {
 interface CloudSyncManager {
     suspend fun syncPendingChanges(): Result<Int>
     suspend fun mergeGuestDataIntoAccount(accountId: String, discardGuestData: Boolean): Result<Unit>
+}
+
+/**
+ * Quản lý cài đặt giao diện, hạn mức học và streak người dùng (Mục 11 & 13).
+ */
+interface UserPreferencesRepository {
+    fun observeUserPreferences(): Flow<UserPreferences>
+    suspend fun getUserPreferences(): UserPreferences
+    suspend fun setThemeMode(mode: ThemeMode): Result<Unit>
+    suspend fun setDailyNewCardsLimit(limit: Int): Result<Unit>
+    suspend fun setDailyReminder(enabled: Boolean, hour: Int, minute: Int): Result<Unit>
+    suspend fun setSoundEnabled(enabled: Boolean): Result<Unit>
+    suspend fun setOnboardingCompleted(completed: Boolean): Result<Unit>
+    suspend fun updateStreak(streak: Int, isFrozen: Boolean): Result<Unit>
+    suspend fun consumeAutoFillQuota(): Result<Int>
+    suspend fun consumeSentenceGradingQuota(): Result<Int>
+    suspend fun resetDailyQuotasIfNeeded(currentEpochDay: Long): Result<Unit>
 }
