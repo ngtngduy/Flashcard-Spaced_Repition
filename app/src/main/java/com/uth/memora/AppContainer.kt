@@ -1,6 +1,9 @@
 package com.uth.memora
 
 import android.content.Context
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.CreationExtras
 import com.uth.memora.core.domain.AiCardAutoFillService
 import com.uth.memora.core.domain.AiGradingService
 import com.uth.memora.core.domain.AuthRepository
@@ -80,5 +83,20 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     override val syncStatusProvider: SyncStatusProvider by lazy {
         FakeSyncStatusProvider()
+    }
+}
+
+/**
+ * Trợ giúp khởi tạo ViewModel dễ dàng từ Composable:
+ * val viewModel: HomeViewModel = viewModel(factory = memoraViewModelFactory { HomeViewModel(it.deckRepository) })
+ */
+fun <VM : ViewModel> memoraViewModelFactory(
+    initializer: CreationExtras.(AppContainer) -> VM
+): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
+        val app = extras[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as? MemoraApplication
+            ?: throw IllegalStateException("Application must be an instance of MemoraApplication")
+        return initializer(extras, app.container) as T
     }
 }
