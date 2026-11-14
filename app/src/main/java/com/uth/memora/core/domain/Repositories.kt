@@ -192,3 +192,21 @@ interface AuthRepository {
 interface AiCardAutoFillService {
     suspend fun autoFillCard(word: String): Result<AutoFillCardData>
 }
+
+/**
+ * Tóm tắt trạng thái đồng bộ đám mây (Hiển thị ở Cài đặt - Figma 13:2).
+ */
+data class CloudSyncSummary(
+    val isSyncing: Boolean = false,
+    val pendingChangesCount: Int = 0,
+    val lastSyncedAtMillis: Long? = null,
+    val syncErrorMessage: String? = null
+)
+
+/**
+ * Cung cấp luồng trạng thái đồng bộ và cho phép người dùng bấm "Đồng bộ ngay" (Mục 13).
+ */
+interface SyncStatusProvider {
+    fun observeSyncSummary(): Flow<CloudSyncSummary>
+    suspend fun triggerImmediateSync(): Result<Int>
+}
