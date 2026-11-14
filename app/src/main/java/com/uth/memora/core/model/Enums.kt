@@ -38,3 +38,14 @@ enum class SentenceStatus(val labelVi: String) {
     /** Thử lại tối đa 3 lần không thành công hoặc kết quả sai định dạng */
     GRADE_ERROR("Lỗi chấm")
 }
+
+/**
+ * Chế độ của một phiên học Flashcard (Mục 6.5 & 6.6, Figma 2104:23 vs 2101:15).
+ */
+enum class StudyMode(val labelVi: String) {
+    /** Học từ mới: mặt sau có 2 nút "Học lại" và "Đã nhớ" */
+    NEW_CARDS("Học từ mới"),
+
+    /** Ôn tập đến hạn: mặt sau có 4 nút SM-2 ("Chưa nhớ", "Khó", "Nhớ tốt", "Dễ") */
+    DUE_REVIEW("Ôn tập")
+}

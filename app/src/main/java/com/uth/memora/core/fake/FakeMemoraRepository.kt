@@ -383,6 +383,18 @@ class FakeMemoraRepository(
         }
     }
 
+    override suspend fun markNewCardDisplayed(cardId: String): Result<Card> {
+        val card = getCardById(cardId) ?: return Result.failure(NoSuchElementException("Không tìm thấy thẻ."))
+        val updated = Sm2Engine.markCardDisplayedFirstTime(
+            card = card,
+            currentLearningDay = todayLearningDay
+        )
+        if (updated != card) {
+            _cards.value = _cards.value.map { if (it.id == cardId) updated else it }
+        }
+        return Result.success(updated)
+    }
+
     // ---------------- PracticeSentenceRepository ----------------
 
     override fun observeSentencesByCard(cardId: String): Flow<List<PracticeSentence>> =
@@ -390,6 +402,9 @@ class FakeMemoraRepository(
 
     override fun observeRecentSentences(): Flow<List<PracticeSentence>> =
         _sentences.map { list -> list.sortedByDescending { it.createdAtMillis } }
+
+    override suspend fun getPendingSentences(): List<PracticeSentence> =
+        _sentences.value.filter { it.status == SentenceStatus.PENDING_GRADE }
 
     override suspend fun getSuggestedPracticeCards(deckId: String?, limit: Int): List<Card> {
         val active = _cards.value.filter { !it.isDeleted && (deckId == null || it.deckId == deckId) }
@@ -473,6 +488,58 @@ class FakeMemoraRepository(
         return Result.success(finalRecord)
     }
 
+    override suspend fun saveAiGradingResult(
+        sentenceId: String,
+        status: SentenceStatus,
+        score: Float?,
+        cefrLevel: String?,
+        feedbackVi: String?,
+        grammarAnalysis: List<String>,
+        correctedSentence: String?,
+        naturalAlternative: String?,
+        errorMessage: String?,
+        retryCount: Int?
+    ): Result<PracticeSentence> {
+        val existing = _sentences.value.firstOrNull { it.id == sentenceId }
+            ?: return Result.failure(NoSuchElementException("Không tìm thấy câu luyện tập."))
+        val updated = existing.copy(
+            status = status,
+            score = score ?: existing.score,
+            cefrLevel = cefrLevel ?: existing.cefrLevel,
+            feedbackVi = feedbackVi ?: existing.feedbackVi,
+            grammarAnalysis = grammarAnalysis.ifEmpty { existing.grammarAnalysis },
+            correctedSentence = correctedSentence ?: existing.correctedSentence,
+            naturalAlternative = naturalAlternative ?: existing.naturalAlternative,
+            errorMessage = errorMessage,
+            retryCount = retryCount ?: existing.retryCount,
+            updatedAtMillis = System.currentTimeMillis(),
+            syncStatus = SyncStatus.PENDING_SYNC
+        )
+        _sentences.value = _sentences.value.map { if (it.id == sentenceId) updated else it }
+        return Result.success(updated)
+    }
+
+    override suspend fun saveCorrectedSentenceAsExample(sentenceId: String): Result<Card> {
+        val sentence = _sentences.value.firstOrNull { it.id == sentenceId }
+            ?: return Result.failure(NoSuchElementException("Không tìm thấy câu luyện tập."))
+        val corrected = sentence.correctedSentence?.trim().orEmpty()
+        if (corrected.isEmpty()) {
+            return Result.failure(IllegalStateException("Câu chưa có bản sửa từ AI."))
+        }
+        val card = getCardById(sentence.cardId)
+            ?: return Result.failure(NoSuchElementException("Không tìm thấy thẻ gốc."))
+        return updateCardContent(
+            cardId = card.id,
+            deckId = card.deckId,
+            word = card.word,
+            meaning = card.meaning,
+            phonetic = card.phonetic,
+            partOfSpeech = card.partOfSpeech,
+            example = corrected,
+            localImagePath = card.localImagePath
+        )
+    }
+
     override suspend fun retryFailedSentence(sentenceId: String): Result<PracticeSentence> {
         val existing = _sentences.value.firstOrNull { it.id == sentenceId }
             ?: return Result.failure(NoSuchElementException("Không tìm thấy câu cần chấm lại."))
@@ -521,7 +588,8 @@ class FakeMemoraRepository(
                 masteredCardsCount = masteredCount,
                 totalActiveCardsCount = activeCards.size,
                 stageDistribution = distribution,
-                retentionRatePercent = retentionRate
+                retentionRatePercent = retentionRate,
+                reviewsLast7DaysCount = recentLogs.size
             )
         }
 

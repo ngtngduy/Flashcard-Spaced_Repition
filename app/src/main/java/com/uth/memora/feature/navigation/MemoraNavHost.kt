@@ -25,6 +25,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.uth.memora.core.model.StudyMode
 import com.uth.memora.feature.analytics.AnalyticsRoute
 import com.uth.memora.feature.auth.AuthRoute
 import com.uth.memora.feature.cardeditor.CardEditorRoute
@@ -109,20 +110,33 @@ fun MemoraApp(
             // 5 Tab chính
             composable(MemoraRoutes.HOME) {
                 HomeRoute(
-                    onNavigateToStudy = { deckId -> navController.navigate(MemoraRoutes.study(deckId)) },
-                    onNavigateToDeckDetail = { deckId -> navController.navigate(MemoraRoutes.deckDetail(deckId)) }
+                    onNavigateToStudy = { deckId, mode ->
+                        navController.navigate(MemoraRoutes.study(deckId, mode))
+                    },
+                    onNavigateToDeckDetail = { deckId ->
+                        navController.navigate(MemoraRoutes.deckDetail(deckId))
+                    },
+                    onNavigateToAddCard = {
+                        navController.navigate(MemoraRoutes.cardEditor("deck_everyday"))
+                    },
+                    onNavigateToAuth = {
+                        navController.navigate(MemoraRoutes.AUTH)
+                    }
                 )
             }
 
             composable(MemoraRoutes.DECKS) {
                 DecksRoute(
                     onDeckClick = { deckId -> navController.navigate(MemoraRoutes.deckDetail(deckId)) },
-                    onCreateDeckClick = { navController.navigate(MemoraRoutes.cardEditor("new_deck")) }
+                    // Mở dialog Tạo bộ từ trực tiếp trên DeckListScreen thay vì chuyển sang màn thêm thẻ
+                    onCreateDeckClick = {}
                 )
             }
 
             composable(MemoraRoutes.PRACTICE) {
-                PracticeRoute()
+                PracticeRoute(
+                    onNavigateToAuth = { navController.navigate(MemoraRoutes.AUTH) }
+                )
             }
 
             composable(MemoraRoutes.ANALYTICS) {
@@ -130,7 +144,9 @@ fun MemoraApp(
             }
 
             composable(MemoraRoutes.SETTINGS) {
-                SettingsRoute()
+                SettingsRoute(
+                    onNavigateToAuth = { navController.navigate(MemoraRoutes.AUTH) }
+                )
             }
 
             // Màn hình chi tiết bộ từ & thẻ
@@ -172,11 +188,20 @@ fun MemoraApp(
             // Phiên học SM-2 & Nghỉ giữa chặng
             composable(
                 route = MemoraRoutes.STUDY,
-                arguments = listOf(navArgument("deckId") { type = NavType.StringType })
+                arguments = listOf(
+                    navArgument("deckId") { type = NavType.StringType },
+                    navArgument("mode") {
+                        type = NavType.StringType
+                        defaultValue = StudyMode.DUE_REVIEW.name
+                    }
+                )
             ) { backStackEntry ->
                 val deckId = backStackEntry.arguments?.getString("deckId") ?: ""
+                val modeName = backStackEntry.arguments?.getString("mode") ?: StudyMode.DUE_REVIEW.name
+                val studyMode = runCatching { StudyMode.valueOf(modeName) }.getOrDefault(StudyMode.DUE_REVIEW)
                 StudyRoute(
                     deckId = deckId,
+                    studyMode = studyMode,
                     onIntermission = { navController.navigate(MemoraRoutes.intermission(deckId)) },
                     onFinishSession = { navController.popBackStack() },
                     onBack = { navController.popBackStack() }

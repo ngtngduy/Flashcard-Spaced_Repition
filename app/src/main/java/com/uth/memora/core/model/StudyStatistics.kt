@@ -26,8 +26,12 @@ data class StudyStatistics(
     val stageDistribution: Map<RetentionStage, Int> = RetentionStage.entries.associateWith { 0 },
     /** Tỷ lệ nhớ (%) trong 7 ngày gần nhất trên Thẻ đã học */
     val retentionRatePercent: Float = 0f,
+    /** Số lượt đánh giá hợp lệ trong 7 ngày gần nhất (Figma 10:707 · 2212:5) */
+    val reviewsLast7DaysCount: Int = 0,
     /** Khiên bảo vệ chuỗi ngày học còn khả dụng trong chu kỳ 30 ngày (Mục 10.2 & 11) */
     val streakFreezeAvailable: Boolean = true,
     /** Trạng thái chuỗi ngày học đang được khiên bảo vệ trong ngày hôm nay */
-    val isStreakProtectedToday: Boolean = false
+    val isStreakProtectedToday: Boolean = false,
+    /** Số ngày còn lại để khiên bảo vệ tự hồi phục (0 nếu đang sẵn sàng) */
+    val nextFreezeAvailableInDays: Int = 0
 )

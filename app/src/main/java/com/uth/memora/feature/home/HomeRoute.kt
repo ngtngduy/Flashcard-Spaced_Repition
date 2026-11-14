@@ -2,12 +2,15 @@ package com.uth.memora.feature.home
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import com.uth.memora.core.model.StudyMode
 import com.uth.memora.feature.common.PlaceholderScreen
 
 @Composable
 fun HomeRoute(
-    onNavigateToStudy: (String) -> Unit,
+    onNavigateToStudy: (String, StudyMode) -> Unit,
     onNavigateToDeckDetail: (String) -> Unit,
+    onNavigateToAddCard: () -> Unit = {},
+    onNavigateToAuth: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     PlaceholderScreen(

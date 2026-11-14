@@ -50,10 +50,17 @@ class FakeUserPreferencesRepository(
         return Result.success(Unit)
     }
 
-    override suspend fun updateStreak(streak: Int, isFrozen: Boolean): Result<Unit> {
+    override suspend fun updateStreak(
+        streak: Int,
+        isFrozen: Boolean,
+        lastStudyLearningDay: Long?,
+        lastFreezeUsedDay: Long?
+    ): Result<Unit> {
         _preferences.value = _preferences.value.copy(
             currentStreak = streak.coerceAtLeast(0),
-            isStreakFreezeActive = isFrozen
+            isStreakFreezeActive = isFrozen,
+            lastStudyLearningDay = lastStudyLearningDay ?: _preferences.value.lastStudyLearningDay,
+            lastStreakFreezeUsedDay = lastFreezeUsedDay ?: _preferences.value.lastStreakFreezeUsedDay
         )
         return Result.success(Unit)
     }
@@ -86,6 +93,11 @@ class FakeUserPreferencesRepository(
                 lastQuotaResetEpochDay = currentEpochDay
             )
         }
+        return Result.success(Unit)
+    }
+
+    override suspend fun setLastSyncedAtMillis(timestampMillis: Long): Result<Unit> {
+        _preferences.value = _preferences.value.copy(lastSyncedAtMillis = timestampMillis)
         return Result.success(Unit)
     }
 }

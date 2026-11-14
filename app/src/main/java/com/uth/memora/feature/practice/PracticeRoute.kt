@@ -6,6 +6,7 @@ import com.uth.memora.feature.common.PlaceholderScreen
 
 @Composable
 fun PracticeRoute(
+    onNavigateToAuth: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     PlaceholderScreen(

@@ -27,8 +27,8 @@ class FakeAuthRepository(
 
     override suspend fun signInWithEmail(email: String, password: String): Result<UserAccount> {
         val cleanEmail = email.trim()
-        if (!cleanEmail.contains("@") || password.length < 6) {
-            return Result.failure(IllegalArgumentException("Email không hợp lệ hoặc mật khẩu dưới 6 ký tự."))
+        if (!cleanEmail.contains("@") || password.length < 8) {
+            return Result.failure(IllegalArgumentException("Email hoặc mật khẩu không đúng (mật khẩu tối thiểu 8 ký tự)."))
         }
         val account = UserAccount(
             uid = "email_user_${UUID.randomUUID().toString().take(8)}",
@@ -46,8 +46,8 @@ class FakeAuthRepository(
         displayName: String
     ): Result<UserAccount> {
         val cleanEmail = email.trim()
-        if (!cleanEmail.contains("@") || password.length < 6) {
-            return Result.failure(IllegalArgumentException("Email không hợp lệ hoặc mật khẩu dưới 6 ký tự."))
+        if (!cleanEmail.contains("@") || password.length < 8) {
+            return Result.failure(IllegalArgumentException("Email không hợp lệ hoặc mật khẩu dưới 8 ký tự."))
         }
         val account = UserAccount(
             uid = "email_user_${UUID.randomUUID().toString().take(8)}",

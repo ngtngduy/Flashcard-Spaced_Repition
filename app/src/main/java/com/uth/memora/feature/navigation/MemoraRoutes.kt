@@ -1,5 +1,7 @@
 package com.uth.memora.feature.navigation
 
+import com.uth.memora.core.model.StudyMode
+
 /**
  * Định nghĩa danh sách các màn hình và route điều hướng trong ứng dụng Memora.
  *
@@ -30,8 +32,9 @@ object MemoraRoutes {
 
     // Phiên học Spaced Repetition (SM-2) & Màn hình nghỉ giữa chặng
     const val STUDY_BASE = "study"
-    const val STUDY = "study/{deckId}"
-    fun study(deckId: String): String = "$STUDY_BASE/$deckId"
+    const val STUDY = "study/{deckId}?mode={mode}"
+    fun study(deckId: String, mode: StudyMode = StudyMode.DUE_REVIEW): String =
+        "$STUDY_BASE/$deckId?mode=${mode.name}"
 
     const val INTERMISSION_BASE = "study_intermission"
     const val INTERMISSION = "study_intermission/{deckId}"

@@ -6,6 +6,7 @@ import com.uth.memora.core.model.Deck
 import com.uth.memora.core.model.PartOfSpeech
 import com.uth.memora.core.model.PracticeSentence
 import com.uth.memora.core.model.ReviewQuality
+import com.uth.memora.core.model.SentenceStatus
 import com.uth.memora.core.model.StudyStatistics
 import com.uth.memora.core.model.ThemeMode
 import com.uth.memora.core.model.UserAccount
@@ -111,11 +112,17 @@ interface StudySessionRepository {
      * Đếm số thẻ dự kiến đến hạn vào ngày học kế tiếp (Màn Tổng kết phiên - Figma 2199:19).
      */
     suspend fun getTomorrowDueCount(deckId: String? = null): Int
+
+    /**
+     * Đánh dấu thẻ mới ngay khi lần đầu được hiển thị trong phiên học (Mục 6.5).
+     */
+    suspend fun markNewCardDisplayed(cardId: String): Result<Card>
 }
 
 interface PracticeSentenceRepository {
     fun observeSentencesByCard(cardId: String): Flow<List<PracticeSentence>>
     fun observeRecentSentences(): Flow<List<PracticeSentence>>
+    suspend fun getPendingSentences(): List<PracticeSentence>
 
     /**
      * Chọn danh sách tối đa 5 từ mục tiêu cho một buổi luyện đặt câu (Mục 6.7).
@@ -133,6 +140,27 @@ interface PracticeSentenceRepository {
         sentence: String,
         isOnline: Boolean = true
     ): Result<PracticeSentence>
+
+    /**
+     * Lưu kết quả chấm câu AI hoặc cập nhật trạng thái retry/error từ SentenceGradingWorker (Mục 8.2).
+     */
+    suspend fun saveAiGradingResult(
+        sentenceId: String,
+        status: SentenceStatus,
+        score: Float? = null,
+        cefrLevel: String? = null,
+        feedbackVi: String? = null,
+        grammarAnalysis: List<String> = emptyList(),
+        correctedSentence: String? = null,
+        naturalAlternative: String? = null,
+        errorMessage: String? = null,
+        retryCount: Int? = null
+    ): Result<PracticeSentence>
+
+    /**
+     * Lưu câu đã sửa từ AI làm câu ví dụ riêng cho thẻ (Mục 6.7 · Figma 2212:92).
+     */
+    suspend fun saveCorrectedSentenceAsExample(sentenceId: String): Result<Card>
 
     /**
      * Bấm "Chấm lại" cho một câu đang ở trạng thái Lỗi chấm (Mục 8.2).
@@ -174,10 +202,16 @@ interface UserPreferencesRepository {
     suspend fun setDailyReminder(enabled: Boolean, hour: Int, minute: Int): Result<Unit>
     suspend fun setSoundEnabled(enabled: Boolean): Result<Unit>
     suspend fun setOnboardingCompleted(completed: Boolean): Result<Unit>
-    suspend fun updateStreak(streak: Int, isFrozen: Boolean): Result<Unit>
+    suspend fun updateStreak(
+        streak: Int,
+        isFrozen: Boolean,
+        lastStudyLearningDay: Long? = null,
+        lastFreezeUsedDay: Long? = null
+    ): Result<Unit>
     suspend fun consumeAutoFillQuota(): Result<Int>
     suspend fun consumeSentenceGradingQuota(): Result<Int>
     suspend fun resetDailyQuotasIfNeeded(currentEpochDay: Long): Result<Unit>
+    suspend fun setLastSyncedAtMillis(timestampMillis: Long): Result<Unit>
 }
 
 /**

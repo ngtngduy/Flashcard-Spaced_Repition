@@ -8,6 +8,7 @@ import com.uth.memora.core.domain.AiCardAutoFillService
 import com.uth.memora.core.domain.AiGradingService
 import com.uth.memora.core.domain.AuthRepository
 import com.uth.memora.core.domain.CardRepository
+import com.uth.memora.core.domain.CloudSyncManager
 import com.uth.memora.core.domain.DeckRepository
 import com.uth.memora.core.domain.PracticeSentenceRepository
 import com.uth.memora.core.domain.StatisticsRepository
@@ -17,6 +18,7 @@ import com.uth.memora.core.domain.UserPreferencesRepository
 import com.uth.memora.core.fake.FakeAiCardAutoFillService
 import com.uth.memora.core.fake.FakeAiGradingService
 import com.uth.memora.core.fake.FakeAuthRepository
+import com.uth.memora.core.fake.FakeCloudSyncManager
 import com.uth.memora.core.fake.FakeMemoraRepository
 import com.uth.memora.core.fake.FakeSyncStatusProvider
 import com.uth.memora.core.fake.FakeUserPreferencesRepository
@@ -38,6 +40,7 @@ interface AppContainer {
     val authRepository: AuthRepository
     val aiGradingService: AiGradingService
     val aiCardAutoFillService: AiCardAutoFillService
+    val cloudSyncManager: CloudSyncManager
     val syncStatusProvider: SyncStatusProvider
 }
 
@@ -79,6 +82,10 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     override val aiCardAutoFillService: AiCardAutoFillService by lazy {
         FakeAiCardAutoFillService()
+    }
+
+    override val cloudSyncManager: CloudSyncManager by lazy {
+        FakeCloudSyncManager()
     }
 
     override val syncStatusProvider: SyncStatusProvider by lazy {

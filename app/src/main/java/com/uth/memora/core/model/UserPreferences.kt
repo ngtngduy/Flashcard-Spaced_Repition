@@ -23,9 +23,12 @@ data class UserPreferences(
     val currentStreak: Int = 0,
     val isStreakFreezeActive: Boolean = false,
     val hasStreakFreezeAvailable: Boolean = true,
+    val lastStudyLearningDay: Long? = null,
+    val lastStreakFreezeUsedDay: Long? = null,
     val aiAutoFillRemainingToday: Int = DEFAULT_AI_AUTO_FILL_LIMIT,
     val aiSentenceGradingRemainingToday: Int = DEFAULT_AI_SENTENCE_LIMIT,
-    val lastQuotaResetEpochDay: Long = 0L
+    val lastQuotaResetEpochDay: Long = 0L,
+    val lastSyncedAtMillis: Long? = null
 ) {
     companion object {
         const val MIN_DAILY_NEW_CARDS = 5
