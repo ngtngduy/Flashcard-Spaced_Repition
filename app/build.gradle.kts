@@ -66,6 +66,9 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
 
+    // DataStore Preferences (Settings, Quotas & Streak)
+    implementation(libs.androidx.datastore.preferences)
+
     // WorkManager (Offline Queue & Daily Reminder)
     implementation(libs.androidx.work.runtime.ktx)
 
