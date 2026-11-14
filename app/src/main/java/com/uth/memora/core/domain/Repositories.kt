@@ -106,6 +106,11 @@ interface StudySessionRepository {
      * Xem trước mốc thời gian hiển thị trên 4 nút của một thẻ.
      */
     fun getButtonPreviewLabels(card: Card): Map<ReviewQuality, String>
+
+    /**
+     * Đếm số thẻ dự kiến đến hạn vào ngày học kế tiếp (Màn Tổng kết phiên - Figma 2199:19).
+     */
+    suspend fun getTomorrowDueCount(deckId: String? = null): Int
 }
 
 interface PracticeSentenceRepository {
@@ -176,11 +181,14 @@ interface UserPreferencesRepository {
 }
 
 /**
- * Quản lý xác thực người dùng và đăng nhập Google / Chế độ khách (Mục 13).
+ * Quản lý xác thực người dùng: Email/Mật khẩu, Google & Chế độ khách (Mục 6.2 & 13).
  */
 interface AuthRepository {
     fun observeCurrentUser(): Flow<UserAccount?>
     suspend fun getCurrentUser(): UserAccount?
+    suspend fun signInWithEmail(email: String, password: String): Result<UserAccount>
+    suspend fun registerWithEmail(email: String, password: String, displayName: String): Result<UserAccount>
+    suspend fun sendPasswordResetEmail(email: String): Result<Unit>
     suspend fun signInWithGoogle(idToken: String): Result<UserAccount>
     suspend fun signInAnonymously(): Result<UserAccount>
     suspend fun signOut(): Result<Unit>

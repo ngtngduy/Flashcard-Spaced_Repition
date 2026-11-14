@@ -25,6 +25,48 @@ class FakeAuthRepository(
 
     override suspend fun getCurrentUser(): UserAccount? = _currentUser.value
 
+    override suspend fun signInWithEmail(email: String, password: String): Result<UserAccount> {
+        val cleanEmail = email.trim()
+        if (!cleanEmail.contains("@") || password.length < 6) {
+            return Result.failure(IllegalArgumentException("Email không hợp lệ hoặc mật khẩu dưới 6 ký tự."))
+        }
+        val account = UserAccount(
+            uid = "email_user_${UUID.randomUUID().toString().take(8)}",
+            email = cleanEmail,
+            displayName = cleanEmail.substringBefore("@"),
+            isAnonymous = false
+        )
+        _currentUser.value = account
+        return Result.success(account)
+    }
+
+    override suspend fun registerWithEmail(
+        email: String,
+        password: String,
+        displayName: String
+    ): Result<UserAccount> {
+        val cleanEmail = email.trim()
+        if (!cleanEmail.contains("@") || password.length < 6) {
+            return Result.failure(IllegalArgumentException("Email không hợp lệ hoặc mật khẩu dưới 6 ký tự."))
+        }
+        val account = UserAccount(
+            uid = "email_user_${UUID.randomUUID().toString().take(8)}",
+            email = cleanEmail,
+            displayName = displayName.trim().ifEmpty { cleanEmail.substringBefore("@") },
+            isAnonymous = false
+        )
+        _currentUser.value = account
+        return Result.success(account)
+    }
+
+    override suspend fun sendPasswordResetEmail(email: String): Result<Unit> {
+        val cleanEmail = email.trim()
+        if (!cleanEmail.contains("@")) {
+            return Result.failure(IllegalArgumentException("Email không hợp lệ."))
+        }
+        return Result.success(Unit)
+    }
+
     override suspend fun signInWithGoogle(idToken: String): Result<UserAccount> {
         val account = UserAccount(
             uid = "google_user_${UUID.randomUUID().toString().take(8)}",

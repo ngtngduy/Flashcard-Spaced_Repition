@@ -373,6 +373,16 @@ class FakeMemoraRepository(
         return Sm2Engine.previewButtonIntervals(card, todayLearningDay)
     }
 
+    override suspend fun getTomorrowDueCount(deckId: String?): Int {
+        val tomorrow = todayLearningDay + 1L
+        return _cards.value.count {
+            !it.isDeleted &&
+                (deckId == null || it.deckId == deckId) &&
+                it.state == CardState.REVIEW &&
+                it.dueDay == tomorrow
+        }
+    }
+
     // ---------------- PracticeSentenceRepository ----------------
 
     override fun observeSentencesByCard(cardId: String): Flow<List<PracticeSentence>> =
