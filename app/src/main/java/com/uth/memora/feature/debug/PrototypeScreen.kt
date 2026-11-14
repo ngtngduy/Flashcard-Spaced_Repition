@@ -14,10 +14,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Style
-import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -299,7 +299,7 @@ private fun StudyReviewTab(repository: FakeMemoraRepository) {
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Icon(Icons.Default.Undo, contentDescription = null)
+            Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = null)
             Text(" Hoàn tác lượt đánh giá gần nhất (Mục 9.1)")
         }
     }
