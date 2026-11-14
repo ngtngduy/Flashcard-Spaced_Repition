@@ -8,6 +8,7 @@ import com.uth.memora.core.model.PracticeSentence
 import com.uth.memora.core.model.ReviewQuality
 import com.uth.memora.core.model.StudyStatistics
 import com.uth.memora.core.model.ThemeMode
+import com.uth.memora.core.model.UserAccount
 import com.uth.memora.core.model.UserPreferences
 import kotlinx.coroutines.flow.Flow
 
@@ -172,4 +173,22 @@ interface UserPreferencesRepository {
     suspend fun consumeAutoFillQuota(): Result<Int>
     suspend fun consumeSentenceGradingQuota(): Result<Int>
     suspend fun resetDailyQuotasIfNeeded(currentEpochDay: Long): Result<Unit>
+}
+
+/**
+ * Quản lý xác thực người dùng và đăng nhập Google / Chế độ khách (Mục 13).
+ */
+interface AuthRepository {
+    fun observeCurrentUser(): Flow<UserAccount?>
+    suspend fun getCurrentUser(): UserAccount?
+    suspend fun signInWithGoogle(idToken: String): Result<UserAccount>
+    suspend fun signInAnonymously(): Result<UserAccount>
+    suspend fun signOut(): Result<Unit>
+}
+
+/**
+ * Dịch vụ AI gợi ý điền nhanh thông tin thẻ học (Thành viên 3 hiện thực trong `integration/ai`).
+ */
+interface AiCardAutoFillService {
+    suspend fun autoFillCard(word: String): Result<AutoFillCardData>
 }
