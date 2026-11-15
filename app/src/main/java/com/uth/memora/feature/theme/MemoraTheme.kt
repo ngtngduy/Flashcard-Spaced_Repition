@@ -66,6 +66,7 @@ fun MemoraTheme(
     val colorScheme = if (darkTheme) DarkColors else LightColors
     MaterialTheme(
         colorScheme = colorScheme,
+        typography = MemoraTypography,
         content = content
     )
 }
