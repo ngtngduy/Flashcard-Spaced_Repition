@@ -4,6 +4,8 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -19,9 +21,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.uth.memora.core.model.RetentionStage
+import com.uth.memora.feature.theme.MemoraTheme
 import com.uth.memora.feature.theme.PrimaryBlue
 import com.uth.memora.feature.theme.StatusSuccess
 import com.uth.memora.feature.theme.StatusWarning
@@ -102,4 +106,40 @@ fun MemoraLinearProgressBar(
         trackColor = trackColor,
         strokeCap = StrokeCap.Round
     )
+}
+
+@Preview(name = "Badges & Progress - Dark", showBackground = true)
+@Composable
+private fun MemoraBadgesDarkPreview() {
+    MemoraTheme(darkTheme = true) {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                RetentionStage.entries.forEach { stage ->
+                    MemoraStatusBadge(stage = stage)
+                }
+                MemoraLinearProgressBar(progress = 0.65f)
+            }
+        }
+    }
+}
+
+@Preview(name = "Badges & Progress - Light", showBackground = true)
+@Composable
+private fun MemoraBadgesLightPreview() {
+    MemoraTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                RetentionStage.entries.forEach { stage ->
+                    MemoraStatusBadge(stage = stage)
+                }
+                MemoraLinearProgressBar(progress = 0.65f)
+            }
+        }
+    }
 }

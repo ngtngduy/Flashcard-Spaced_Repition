@@ -5,10 +5,13 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.uth.memora.feature.theme.MemoraTheme
 
 /**
  * Hộp thoại xác nhận chuẩn cho thao tác xóa mềm bộ từ/thẻ hoặc đặt lại tiến độ (Mục 6.1, 6.2 & 6.9).
@@ -74,4 +77,36 @@ fun ConfirmDialog(
             }
         }
     )
+}
+
+@Preview(name = "ConfirmDialog - Dark", showBackground = true)
+@Composable
+private fun ConfirmDialogDarkPreview() {
+    MemoraTheme(darkTheme = true) {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            ConfirmDialog(
+                title = "Xóa bộ từ vựng?",
+                message = "Xóa bộ 'TOEIC 600' sẽ xóa mềm toàn bộ 25 thẻ bên trong. Bạn chắc chắn chứ?",
+                confirmText = "Xóa bộ từ",
+                onConfirm = {},
+                onDismiss = {}
+            )
+        }
+    }
+}
+
+@Preview(name = "ConfirmDialog - Light", showBackground = true)
+@Composable
+private fun ConfirmDialogLightPreview() {
+    MemoraTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            ConfirmDialog(
+                title = "Đặt lại tiến độ?",
+                message = "Toàn bộ tiến độ SM-2 của thẻ này sẽ quay về Cấp 0 – Chưa học.",
+                confirmText = "Đặt lại",
+                onConfirm = {},
+                onDismiss = {}
+            )
+        }
+    }
 }

@@ -20,7 +20,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.uth.memora.feature.theme.MemoraTheme
 
 /**
  * Khung trạng thái rỗng (Empty State) chuẩn của Memora (Mục 6 & 11):
@@ -82,6 +84,36 @@ fun EmptyState(
             MemoraPrimaryButton(
                 text = actionText,
                 onClick = onActionClick
+            )
+        }
+    }
+}
+
+@Preview(name = "EmptyState - Dark", showBackground = true)
+@Composable
+private fun EmptyStateDarkPreview() {
+    MemoraTheme(darkTheme = true) {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            EmptyState(
+                title = "Chưa có bộ từ vựng nào",
+                description = "Hãy tạo bộ từ đầu tiên hoặc nhập từ kho Bộ có sẵn để bắt đầu học.",
+                actionText = "+ Tạo bộ từ mới",
+                onActionClick = {}
+            )
+        }
+    }
+}
+
+@Preview(name = "EmptyState - Light", showBackground = true)
+@Composable
+private fun EmptyStateLightPreview() {
+    MemoraTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            EmptyState(
+                title = "Chưa có bộ từ vựng nào",
+                description = "Hãy tạo bộ từ đầu tiên hoặc nhập từ kho Bộ có sẵn để bắt đầu học.",
+                actionText = "+ Tạo bộ từ mới",
+                onActionClick = {}
             )
         }
     }
