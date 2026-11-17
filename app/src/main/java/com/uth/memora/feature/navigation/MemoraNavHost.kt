@@ -6,7 +6,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -35,8 +34,8 @@ fun MemoraApp(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    // Chỉ hiển thị Bottom Navigation ở 5 tab chính
-    val isBottomBarVisible = topLevelTabs.any { it.route == currentRoute }
+    // Bảo đảm Bottom Bar chỉ hiện ở đúng 5 tab chính; ẩn ở Onboarding, DeckDetail, CardEditor, Study, Intermission, Auth (Mục 6)
+    val isBottomBarVisible = currentRoute != null && topLevelTabs.any { it.route == currentRoute }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -47,7 +46,7 @@ fun MemoraApp(
                     onTabSelected = { tab ->
                         if (currentRoute != tab.route) {
                             navController.navigate(tab.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
+                                popUpTo(MemoraRoutes.HOME) {
                                     saveState = true
                                 }
                                 launchSingleTop = true
@@ -70,6 +69,7 @@ fun MemoraApp(
                     onFinishOnboarding = {
                         navController.navigate(MemoraRoutes.HOME) {
                             popUpTo(MemoraRoutes.ONBOARDING) { inclusive = true }
+                            launchSingleTop = true
                         }
                     }
                 )
