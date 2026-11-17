@@ -2,22 +2,10 @@ package com.uth.memora.feature.navigation
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.LibraryBooks
-import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.ChatBubble
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -38,20 +26,6 @@ import com.uth.memora.feature.settings.SettingsRoute
 import com.uth.memora.feature.study.IntermissionRoute
 import com.uth.memora.feature.study.StudyRoute
 
-data class NavigationTab(
-    val route: String,
-    val title: String,
-    val icon: ImageVector
-)
-
-val topLevelTabs = listOf(
-    NavigationTab(MemoraRoutes.HOME, "Trang chính", Icons.Default.Home),
-    NavigationTab(MemoraRoutes.DECKS, "Bộ từ", Icons.AutoMirrored.Filled.LibraryBooks),
-    NavigationTab(MemoraRoutes.PRACTICE, "Luyện tập", Icons.Default.ChatBubble),
-    NavigationTab(MemoraRoutes.ANALYTICS, "Thống kê", Icons.Default.BarChart),
-    NavigationTab(MemoraRoutes.SETTINGS, "Cài đặt", Icons.Default.Settings)
-)
-
 @Composable
 fun MemoraApp(
     navController: NavHostController = rememberNavController(),
@@ -60,34 +34,27 @@ fun MemoraApp(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    // Chỉ hiển thị Bottom Navigation ở 5 tab chính
-    val isBottomBarVisible = topLevelTabs.any { it.route == currentRoute }
+    // Bảo đảm Bottom Bar chỉ hiện ở đúng 5 tab chính; ẩn ở Onboarding, DeckDetail, CardEditor, Study, Intermission, Auth (Mục 6)
+    val isBottomBarVisible = currentRoute != null && topLevelTabs.any { it.route == currentRoute }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         bottomBar = {
             if (isBottomBarVisible) {
-                NavigationBar {
-                    topLevelTabs.forEach { tab ->
-                        val selected = currentRoute == tab.route
-                        NavigationBarItem(
-                            selected = selected,
-                            onClick = {
-                                if (!selected) {
-                                    navController.navigate(tab.route) {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            saveState = true
-                                        }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
+                MemoraBottomBar(
+                    currentRoute = currentRoute,
+                    onTabSelected = { tab ->
+                        if (currentRoute != tab.route) {
+                            navController.navigate(tab.route) {
+                                popUpTo(MemoraRoutes.HOME) {
+                                    saveState = true
                                 }
-                            },
-                            icon = { Icon(tab.icon, contentDescription = tab.title) },
-                            label = { Text(tab.title) }
-                        )
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        }
                     }
-                }
+                )
             }
         }
     ) { innerPadding ->
@@ -102,6 +69,7 @@ fun MemoraApp(
                     onFinishOnboarding = {
                         navController.navigate(MemoraRoutes.HOME) {
                             popUpTo(MemoraRoutes.ONBOARDING) { inclusive = true }
+                            launchSingleTop = true
                         }
                     }
                 )
