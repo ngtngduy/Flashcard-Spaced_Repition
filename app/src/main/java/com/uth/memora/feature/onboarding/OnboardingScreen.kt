@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -58,14 +59,15 @@ fun OnboardingScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .systemBarsPadding()
                 .padding(vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Hàng trên cùng chứa nút "Bỏ qua" góc phải (Figma 2053:75)
+            // Hàng trên cùng chứa nút "Bỏ qua" góc phải, căn lề 24.dp đồng bộ (Figma 2053:75)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = 24.dp),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -163,7 +165,7 @@ fun OnboardingPageIndicators(
     }
 }
 
-@Preview(name = "OnboardingScreen - Dark", showBackground = true)
+@Preview(name = "OnboardingScreen - Dark", showBackground = true, widthDp = 360, heightDp = 740)
 @Composable
 private fun OnboardingScreenDarkPreview() {
     MemoraTheme(darkTheme = true) {
@@ -171,7 +173,7 @@ private fun OnboardingScreenDarkPreview() {
     }
 }
 
-@Preview(name = "OnboardingScreen - Light", showBackground = true)
+@Preview(name = "OnboardingScreen - Light", showBackground = true, widthDp = 360, heightDp = 740)
 @Composable
 private fun OnboardingScreenLightPreview() {
     MemoraTheme(darkTheme = false) {
