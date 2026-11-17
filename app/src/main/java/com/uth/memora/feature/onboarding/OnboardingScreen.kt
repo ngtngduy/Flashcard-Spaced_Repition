@@ -19,28 +19,37 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.uth.memora.feature.common.MemoraPrimaryButton
 import com.uth.memora.feature.theme.MemoraTheme
+import kotlinx.coroutines.launch
 
 /**
- * Màn hình giới thiệu ứng dụng gồm HorizontalPager 4 trang và chấm chỉ trang (Figma 2053:63..102).
+ * Màn hình giới thiệu ứng dụng gồm nút Bỏ qua, HorizontalPager 4 trang,
+ * chấm chỉ trang và nút Tiếp theo / Bắt đầu ngay (Figma 2053:63..102 & Mục 6.1).
  */
 @Composable
 fun OnboardingScreen(
     modifier: Modifier = Modifier,
     pages: List<OnboardingPageData> = onboardingPages,
-    initialPage: Int = 0
+    initialPage: Int = 0,
+    onCompleteOnboarding: () -> Unit = {}
 ) {
     val pagerState = rememberPagerState(
         initialPage = initialPage.coerceIn(0, (pages.size - 1).coerceAtLeast(0)),
         pageCount = { pages.size }
     )
+    val coroutineScope = rememberCoroutineScope()
+    val isLastPage = pagerState.currentPage >= pages.lastIndex
 
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -49,9 +58,26 @@ fun OnboardingScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(vertical = 24.dp),
+                .padding(vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Hàng trên cùng chứa nút "Bỏ qua" góc phải (Figma 2053:75)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onCompleteOnboarding) {
+                    Text(
+                        text = "Bỏ qua",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier
@@ -72,6 +98,25 @@ fun OnboardingScreen(
             )
 
             Spacer(modifier = Modifier.height(24.dp))
+
+            // Nút hành động dưới cùng: "Tiếp theo" hoặc "Bắt đầu ngay" ở trang cuối (Figma 2053:72 & 2053:111)
+            MemoraPrimaryButton(
+                text = if (isLastPage) "Bắt đầu ngay" else "Tiếp theo",
+                onClick = {
+                    if (isLastPage) {
+                        onCompleteOnboarding()
+                    } else {
+                        coroutineScope.launch {
+                            pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 }
