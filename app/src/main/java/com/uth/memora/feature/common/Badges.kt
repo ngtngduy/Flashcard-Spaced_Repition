@@ -27,8 +27,10 @@ import androidx.compose.ui.unit.dp
 import com.uth.memora.core.model.RetentionStage
 import com.uth.memora.feature.theme.MemoraTheme
 import com.uth.memora.feature.theme.PrimaryBlue
+import com.uth.memora.feature.theme.PrimaryBlueLight
 import com.uth.memora.feature.theme.StatusSuccess
 import com.uth.memora.feature.theme.StatusWarning
+import com.uth.memora.feature.theme.SurfaceLight
 
 /**
  * Pill badge hiển thị trạng thái hoặc nhãn phân loại với màu nền nhạt, viền và chữ đồng bộ (Mục 6 & 7.5).
@@ -64,13 +66,14 @@ fun MemoraStatusBadge(
     stage: RetentionStage,
     modifier: Modifier = Modifier
 ) {
+    val isLight = MaterialTheme.colorScheme.surface == SurfaceLight
     val stageColor = when (stage) {
         RetentionStage.LEVEL_0_UNLEARNED -> MaterialTheme.colorScheme.onSurfaceVariant
-        RetentionStage.LEVEL_1_STARTING -> StatusWarning
-        RetentionStage.LEVEL_2_SHORT_TERM -> Color(0xFF38BDF8)
-        RetentionStage.LEVEL_3_MID_TERM -> PrimaryBlue
-        RetentionStage.LEVEL_4_NEAR_MASTERED -> Color(0xFF14B8A6)
-        RetentionStage.LEVEL_5_MASTERED -> StatusSuccess
+        RetentionStage.LEVEL_1_STARTING -> if (isLight) Color(0xFFB45309) else StatusWarning
+        RetentionStage.LEVEL_2_SHORT_TERM -> if (isLight) Color(0xFF0369A1) else Color(0xFF38BDF8)
+        RetentionStage.LEVEL_3_MID_TERM -> if (isLight) PrimaryBlueLight else PrimaryBlue
+        RetentionStage.LEVEL_4_NEAR_MASTERED -> if (isLight) Color(0xFF0F766E) else Color(0xFF14B8A6)
+        RetentionStage.LEVEL_5_MASTERED -> if (isLight) Color(0xFF15803D) else StatusSuccess
     }
     MemoraStatusBadge(
         text = stage.titleVi,
