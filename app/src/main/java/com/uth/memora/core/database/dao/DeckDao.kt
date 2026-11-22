@@ -111,6 +111,55 @@ interface DeckDao {
     )
     suspend fun purgeSyncedDeletedBefore(cutoffMillis: Long)
 
+    // ---------------- Đồng bộ đám mây (Mục 8.3 & 10.1) ----------------
+
+    @Query(
+        """
+        SELECT * FROM decks
+        WHERE ownerId = :ownerId AND syncStatus = 'PENDING_SYNC'
+        ORDER BY updatedAtMillis ASC
+        """
+    )
+    suspend fun getPendingSyncDecks(ownerId: String): List<DeckEntity>
+
+    @Query(
+        """
+        UPDATE decks
+        SET syncStatus = :syncStatus,
+            updatedAtMillis = :updatedAtMillis
+        WHERE id = :id
+        """
+    )
+    suspend fun updateSyncStatus(
+        id: String,
+        syncStatus: SyncStatus,
+        updatedAtMillis: Long
+    )
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM decks
+        WHERE ownerId = :ownerId AND syncStatus = 'PENDING_SYNC'
+        """
+    )
+    fun countPendingSync(ownerId: String): Flow<Int>
+
+    @Query(
+        """
+        UPDATE decks
+        SET ownerId = :toOwnerId,
+            updatedAtMillis = :updatedAtMillis,
+            syncStatus = :syncStatus
+        WHERE ownerId = :fromOwnerId
+        """
+    )
+    suspend fun reassignOwner(
+        fromOwnerId: String,
+        toOwnerId: String,
+        updatedAtMillis: Long,
+        syncStatus: SyncStatus = SyncStatus.PENDING_SYNC
+    )
+
     companion object {
         const val PREBUILT_OWNER_ID = "prebuilt_catalog"
     }

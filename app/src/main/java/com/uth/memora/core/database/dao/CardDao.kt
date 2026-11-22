@@ -271,4 +271,53 @@ interface CardDao {
         """
     )
     suspend fun purgeSyncedDeletedBefore(cutoffMillis: Long)
+
+    // ---------------- Đồng bộ đám mây (Mục 8.3 & 10.1) ----------------
+
+    @Query(
+        """
+        SELECT * FROM cards
+        WHERE ownerId = :ownerId AND syncStatus = 'PENDING_SYNC'
+        ORDER BY updatedAtMillis ASC
+        """
+    )
+    suspend fun getPendingSyncCards(ownerId: String): List<CardEntity>
+
+    @Query(
+        """
+        UPDATE cards
+        SET syncStatus = :syncStatus,
+            updatedAtMillis = :updatedAtMillis
+        WHERE id = :id
+        """
+    )
+    suspend fun updateSyncStatus(
+        id: String,
+        syncStatus: SyncStatus,
+        updatedAtMillis: Long
+    )
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM cards
+        WHERE ownerId = :ownerId AND syncStatus = 'PENDING_SYNC'
+        """
+    )
+    fun countPendingSync(ownerId: String): Flow<Int>
+
+    @Query(
+        """
+        UPDATE cards
+        SET ownerId = :toOwnerId,
+            updatedAtMillis = :updatedAtMillis,
+            syncStatus = :syncStatus
+        WHERE ownerId = :fromOwnerId
+        """
+    )
+    suspend fun reassignOwner(
+        fromOwnerId: String,
+        toOwnerId: String,
+        updatedAtMillis: Long,
+        syncStatus: SyncStatus = SyncStatus.PENDING_SYNC
+    )
 }

@@ -77,4 +77,53 @@ interface ReviewLogDao {
 
     @Query("DELETE FROM review_logs WHERE ownerId = :ownerId")
     suspend fun deleteAllByOwner(ownerId: String)
+
+    // ---------------- Đồng bộ đám mây (Mục 8.3 & 10.1) ----------------
+
+    @Query(
+        """
+        SELECT * FROM review_logs
+        WHERE ownerId = :ownerId AND syncStatus = 'PENDING_SYNC'
+        ORDER BY updatedAtMillis ASC
+        """
+    )
+    suspend fun getPendingSyncReviewLogs(ownerId: String): List<ReviewLogEntity>
+
+    @Query(
+        """
+        UPDATE review_logs
+        SET syncStatus = :syncStatus,
+            updatedAtMillis = :updatedAtMillis
+        WHERE id = :id
+        """
+    )
+    suspend fun updateSyncStatus(
+        id: String,
+        syncStatus: SyncStatus,
+        updatedAtMillis: Long
+    )
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM review_logs
+        WHERE ownerId = :ownerId AND syncStatus = 'PENDING_SYNC'
+        """
+    )
+    fun countPendingSync(ownerId: String): Flow<Int>
+
+    @Query(
+        """
+        UPDATE review_logs
+        SET ownerId = :toOwnerId,
+            updatedAtMillis = :updatedAtMillis,
+            syncStatus = :syncStatus
+        WHERE ownerId = :fromOwnerId
+        """
+    )
+    suspend fun reassignOwner(
+        fromOwnerId: String,
+        toOwnerId: String,
+        updatedAtMillis: Long,
+        syncStatus: SyncStatus = SyncStatus.PENDING_SYNC
+    )
 }

@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Query
 import androidx.room.Upsert
 import com.uth.memora.core.database.entity.PracticeSentenceEntity
+import com.uth.memora.core.model.SyncStatus
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -81,4 +82,53 @@ interface PracticeSentenceDao {
 
     @Query("DELETE FROM practice_sentences WHERE ownerId = :ownerId")
     suspend fun deleteAllByOwner(ownerId: String)
+
+    // ---------------- Đồng bộ đám mây (Mục 8.3 & 10.1) ----------------
+
+    @Query(
+        """
+        SELECT * FROM practice_sentences
+        WHERE ownerId = :ownerId AND syncStatus = 'PENDING_SYNC'
+        ORDER BY updatedAtMillis ASC
+        """
+    )
+    suspend fun getPendingSyncSentences(ownerId: String): List<PracticeSentenceEntity>
+
+    @Query(
+        """
+        UPDATE practice_sentences
+        SET syncStatus = :syncStatus,
+            updatedAtMillis = :updatedAtMillis
+        WHERE id = :id
+        """
+    )
+    suspend fun updateSyncStatus(
+        id: String,
+        syncStatus: SyncStatus,
+        updatedAtMillis: Long
+    )
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM practice_sentences
+        WHERE ownerId = :ownerId AND syncStatus = 'PENDING_SYNC'
+        """
+    )
+    fun countPendingSync(ownerId: String): Flow<Int>
+
+    @Query(
+        """
+        UPDATE practice_sentences
+        SET ownerId = :toOwnerId,
+            updatedAtMillis = :updatedAtMillis,
+            syncStatus = :syncStatus
+        WHERE ownerId = :fromOwnerId
+        """
+    )
+    suspend fun reassignOwner(
+        fromOwnerId: String,
+        toOwnerId: String,
+        updatedAtMillis: Long,
+        syncStatus: SyncStatus = SyncStatus.PENDING_SYNC
+    )
 }
