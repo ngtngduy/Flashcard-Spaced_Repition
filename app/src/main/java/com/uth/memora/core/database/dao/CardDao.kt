@@ -198,6 +198,67 @@ interface CardDao {
         limit: Int
     ): List<CardEntity>
 
+    /**
+     * Hàng đợi thẻ đang học (LEARNING) đến hạn theo bước phút, sắp xếp đến hạn sớm nhất trước (Mục 7.6).
+     */
+    @Query(
+        """
+        SELECT * FROM cards
+        WHERE ownerId = :ownerId
+          AND isDeleted = 0
+          AND (:deckId IS NULL OR deckId = :deckId)
+          AND state = 'LEARNING'
+          AND dueAtMillis IS NOT NULL
+          AND dueAtMillis <= :nowMillis
+        ORDER BY dueAtMillis ASC
+        """
+    )
+    suspend fun getDueLearningCards(
+        ownerId: String,
+        deckId: String?,
+        nowMillis: Long
+    ): List<CardEntity>
+
+    /**
+     * Hàng đợi thẻ đã học (REVIEW) đến hạn hoặc quá hạn, ưu tiên dueDay cũ nhất trước (Mục 7.6).
+     */
+    @Query(
+        """
+        SELECT * FROM cards
+        WHERE ownerId = :ownerId
+          AND isDeleted = 0
+          AND (:deckId IS NULL OR deckId = :deckId)
+          AND state = 'REVIEW'
+          AND dueDay IS NOT NULL
+          AND dueDay <= :currentLearningDay
+        ORDER BY dueDay ASC, updatedAtMillis ASC
+        """
+    )
+    suspend fun getDueReviewCards(
+        ownerId: String,
+        deckId: String?,
+        currentLearningDay: Long
+    ): List<CardEntity>
+
+    /**
+     * Đếm số thẻ REVIEW sẽ đến hạn vào ngày học kế tiếp cho màn Tổng kết phiên (Mục 6.6).
+     */
+    @Query(
+        """
+        SELECT COUNT(*) FROM cards
+        WHERE ownerId = :ownerId
+          AND isDeleted = 0
+          AND (:deckId IS NULL OR deckId = :deckId)
+          AND state = 'REVIEW'
+          AND dueDay = :tomorrowDay
+        """
+    )
+    suspend fun countTomorrowDueCards(
+        ownerId: String,
+        deckId: String?,
+        tomorrowDay: Long
+    ): Int
+
     @Query("DELETE FROM cards WHERE ownerId = :ownerId")
     suspend fun deleteAllByOwner(ownerId: String)
 
