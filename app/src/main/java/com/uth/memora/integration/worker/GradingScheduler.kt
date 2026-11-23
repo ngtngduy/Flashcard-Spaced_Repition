@@ -7,6 +7,9 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import com.uth.memora.core.domain.PracticeSentenceRepository
+import com.uth.memora.core.model.SentenceStatus
+import kotlinx.coroutines.CancellationException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -53,6 +56,34 @@ class GradingScheduler(context: Context) {
             workPolicy,
             requestBuilder.build()
         )
+    }
+
+    /**
+     * Khôi phục hàng đợi chấm câu cho toàn bộ câu đang ở trạng thái PENDING_GRADE (Mục 6.8 & 8.2).
+     * An toàn khi gọi lúc khởi động ứng dụng hoặc khi có mạng trở lại nhờ `ExistingWorkPolicy.KEEP`
+     * (không tạo trùng hoặc ghi đè tác vụ đang chờ) và xử lý ngoại lệ an toàn.
+     */
+    suspend fun resumePendingSentences(practiceSentenceRepository: PracticeSentenceRepository) {
+        val pendingSentences = try {
+            practiceSentenceRepository.getPendingSentences()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            return
+        }
+
+        pendingSentences
+            .asSequence()
+            .filter { it.status == SentenceStatus.PENDING_GRADE && it.id.isNotBlank() }
+            .forEach { sentence ->
+                try {
+                    enqueueSentence(sentence.id)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Throwable) {
+                    // Bỏ qua lỗi cục bộ từng tác vụ để các câu chờ khác vẫn được đưa vào hàng đợi (Mục 8.2)
+                }
+            }
     }
 
     companion object {
