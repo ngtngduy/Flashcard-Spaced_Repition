@@ -13,7 +13,7 @@ import com.uth.memora.memoraViewModelFactory
 import kotlinx.coroutines.launch
 
 /**
- * Route điều hướng cho màn hình Phiên học Flashcard (Mục 6.5 & 6.6).
+ * Route điều hướng cho màn hình Phiên học Flashcard (Mục 6.5, 6.6 & 9).
  * Giữ nguyên chữ ký hàm để tương thích với MemoraNavHost.kt.
  */
 @Composable
@@ -23,7 +23,8 @@ fun StudyRoute(
     onIntermission: (String) -> Unit,
     onFinishSession: () -> Unit,
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onNavigateToPractice: () -> Unit = onFinishSession
 ) {
     val viewModel: StudyViewModel = viewModel(
         key = "study_${deckId}_${studyMode.name}",
@@ -57,6 +58,10 @@ fun StudyRoute(
         onFinishSession = onFinishSession,
         onBack = onBack,
         modifier = modifier,
+        onUndoRating = viewModel::undoLastRating,
+        onContinueNextChunk = viewModel::continueToNextChunk,
+        onPauseFromIntermission = viewModel::finishSessionFromIntermission,
+        onNavigateToPractice = onNavigateToPractice,
         snackbarHostState = snackbarHostState
     )
 }

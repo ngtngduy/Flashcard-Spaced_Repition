@@ -23,6 +23,8 @@ data class StudyUiState(
     val totalChunks: Int = 1,
     val isIntermissionPending: Boolean = false,
     val cardShownAtMillis: Long = System.currentTimeMillis(),
+    val totalReviewedCount: Int = 0,
+    val totalStudyDurationSeconds: Int = 0,
     val tomorrowDueCount: Int = 0,
     val errorMessage: String? = null
 ) {
