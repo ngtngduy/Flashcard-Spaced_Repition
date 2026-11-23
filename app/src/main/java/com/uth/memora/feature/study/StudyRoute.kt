@@ -23,7 +23,8 @@ fun StudyRoute(
     onIntermission: (String) -> Unit,
     onFinishSession: () -> Unit,
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onNavigateToPractice: () -> Unit = onFinishSession
 ) {
     val viewModel: StudyViewModel = viewModel(
         key = "study_${deckId}_${studyMode.name}",
@@ -59,7 +60,8 @@ fun StudyRoute(
         modifier = modifier,
         onUndoRating = viewModel::undoLastRating,
         onContinueNextChunk = viewModel::continueToNextChunk,
-        onPauseFromIntermission = onFinishSession,
+        onPauseFromIntermission = viewModel::finishSessionFromIntermission,
+        onNavigateToPractice = onNavigateToPractice,
         snackbarHostState = snackbarHostState
     )
 }

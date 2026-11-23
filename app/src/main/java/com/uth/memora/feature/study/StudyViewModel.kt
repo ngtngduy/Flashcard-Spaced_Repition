@@ -21,8 +21,9 @@ import kotlinx.coroutines.launch
  * ViewModel điều phối phiên học Flashcard cho cả 2 chế độ:
  * - Học từ mới (StudyMode.NEW_CARDS - Mục 6.5)
  * - Ôn tập đến hạn (StudyMode.DUE_REVIEW - Mục 6.6)
- * Hỗ trợ hoàn tác (Undo) lượt đánh giá gần nhất trong cửa sổ 5 giây (Mục 9.1)
- * và chia chặng chống quá tải bằng ReviewQueueChunker khi hàng đợi > 30 thẻ (Mục 9.2).
+ * Hỗ trợ hoàn tác (Undo) lượt đánh giá gần nhất trong cửa sổ 5 giây (Mục 9.1),
+ * chia chặng chống quá tải bằng ReviewQueueChunker khi hàng đợi > 30 thẻ (Mục 9.2),
+ * và tải số thẻ dự kiến đến hạn ngày mai khi kết thúc phiên (Figma 2199:19).
  */
 class StudyViewModel(
     private val repository: StudySessionRepository,
@@ -47,6 +48,7 @@ class StudyViewModel(
 
     // Ghi nhớ lượt đánh giá gần nhất có xếp lặp lại thẻ xuống cuối hàng đợi hay không
     private var lastRatingRequeuedCard: Boolean = false
+    private var lastRatingDurationSeconds: Int = 0
 
     // Job đếm ngược 5 giây cho cửa sổ Hoàn tác (Undo - Mục 9.1)
     private var undoCountdownJob: Job? = null
@@ -96,6 +98,8 @@ class StudyViewModel(
                             totalCardsInChunk = 0,
                             currentChunkIndex = 0,
                             totalChunks = 1,
+                            totalReviewedCount = 0,
+                            totalStudyDurationSeconds = 0,
                             tomorrowDueCount = tomorrowCount
                         )
                     }
@@ -118,6 +122,8 @@ class StudyViewModel(
                         totalCardsInChunk = firstChunk.size,
                         currentChunkIndex = 0,
                         totalChunks = chunks.size,
+                        totalReviewedCount = 0,
+                        totalStudyDurationSeconds = 0,
                         isSessionFinished = false,
                         isIntermissionPending = false,
                         cardShownAtMillis = System.currentTimeMillis()
@@ -170,7 +176,8 @@ class StudyViewModel(
 
     /**
      * Ghi nhận đánh giá thẻ (2 nút cho NEW_CARDS hoặc 4 nút SM-2 cho DUE_REVIEW - Mục 6.5, 6.6, 7.2 & 9.2).
-     * Khi hoàn thành 1 chặng và vẫn còn chặng tiếp theo, bật isIntermissionPending = true thay vì kết thúc hẳn phiên.
+     * Khi hoàn thành 1 chặng và vẫn còn chặng tiếp theo, bật isIntermissionPending = true;
+     * khi hoàn tất toàn bộ phiên, gọi repository.getTomorrowDueCount() cho màn Tổng kết (Figma 2199:19).
      */
     fun submitRating(quality: ReviewQuality) {
         val state = _uiState.value
@@ -201,11 +208,14 @@ class StudyViewModel(
                 val shouldRepeatInSession = (studyMode == StudyMode.NEW_CARDS && quality == ReviewQuality.AGAIN) ||
                     updatedCard.state == CardState.LEARNING
                 lastRatingRequeuedCard = shouldRepeatInSession
+                lastRatingDurationSeconds = durationSeconds
                 if (shouldRepeatInSession) {
                     mutableQueue.add(updatedCard)
                 }
 
                 val nextIndex = state.currentIndex + 1
+                val newReviewedCount = state.totalReviewedCount + 1
+                val newStudyDuration = state.totalStudyDurationSeconds + durationSeconds
                 val toastText = if (studyMode == StudyMode.NEW_CARDS && quality == ReviewQuality.AGAIN) {
                     "Đã ghi nhận: Học lại · Xếp cuối hàng đợi"
                 } else {
@@ -224,7 +234,9 @@ class StudyViewModel(
                                 undoToastMessage = toastText,
                                 isIntermissionPending = true,
                                 isSessionFinished = false,
-                                totalCardsInChunk = mutableQueue.size
+                                totalCardsInChunk = mutableQueue.size,
+                                totalReviewedCount = newReviewedCount,
+                                totalStudyDurationSeconds = newStudyDuration
                             )
                         }
                     } else {
@@ -242,6 +254,8 @@ class StudyViewModel(
                                 isIntermissionPending = false,
                                 isSessionFinished = true,
                                 totalCardsInChunk = mutableQueue.size,
+                                totalReviewedCount = newReviewedCount,
+                                totalStudyDurationSeconds = newStudyDuration,
                                 tomorrowDueCount = tomorrowCount
                             )
                         }
@@ -260,6 +274,8 @@ class StudyViewModel(
                             canUndo = true,
                             undoToastMessage = toastText,
                             totalCardsInChunk = mutableQueue.size,
+                            totalReviewedCount = newReviewedCount,
+                            totalStudyDurationSeconds = newStudyDuration,
                             cardShownAtMillis = System.currentTimeMillis()
                         )
                     }
@@ -283,7 +299,7 @@ class StudyViewModel(
         val state = _uiState.value
         val nextChunkIndex = state.currentChunkIndex + 1
         if (nextChunkIndex !in chunks.indices) {
-            _uiState.update { it.copy(isIntermissionPending = false, isSessionFinished = true) }
+            finishSessionFromIntermission()
             return
         }
 
@@ -307,6 +323,28 @@ class StudyViewModel(
                     isIntermissionPending = false,
                     isSessionFinished = false,
                     cardShownAtMillis = System.currentTimeMillis()
+                )
+            }
+        }
+    }
+
+    /**
+     * Khi người dùng chọn "Nghỉ ngơi tại đây" từ màn Nghỉ giữa chặng, tải số thẻ ngày mai và mở Tổng kết phiên.
+     */
+    fun finishSessionFromIntermission() {
+        undoCountdownJob?.cancel()
+        viewModelScope.launch {
+            val tomorrowCount = runCatching {
+                repository.getTomorrowDueCount(normalizedDeckId)
+            }.getOrDefault(0)
+
+            _uiState.update {
+                it.copy(
+                    canUndo = false,
+                    undoToastMessage = null,
+                    isIntermissionPending = false,
+                    isSessionFinished = true,
+                    tomorrowDueCount = tomorrowCount
                 )
             }
         }
@@ -349,6 +387,8 @@ class StudyViewModel(
                         isSessionFinished = false,
                         isIntermissionPending = false,
                         totalCardsInChunk = mutableQueue.size,
+                        totalReviewedCount = (state.totalReviewedCount - 1).coerceAtLeast(0),
+                        totalStudyDurationSeconds = (state.totalStudyDurationSeconds - lastRatingDurationSeconds).coerceAtLeast(0),
                         cardShownAtMillis = System.currentTimeMillis()
                     )
                 }

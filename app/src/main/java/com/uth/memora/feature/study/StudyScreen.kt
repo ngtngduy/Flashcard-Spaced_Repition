@@ -213,11 +213,15 @@ fun StudyScreen(
     onUndoRating: () -> Unit = {},
     onContinueNextChunk: () -> Unit = {},
     onPauseFromIntermission: () -> Unit = onFinishSession,
+    onNavigateToPractice: () -> Unit = onFinishSession,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() }
 ) {
-    val screenTitle = when (uiState.studyMode) {
-        StudyMode.NEW_CARDS -> "Học từ mới"
-        StudyMode.DUE_REVIEW -> "Ôn tập hôm nay"
+    val screenTitle = when (uiState.isSessionFinished) {
+        true -> "Tổng kết phiên học"
+        false -> when (uiState.studyMode) {
+            StudyMode.NEW_CARDS -> "Học từ mới"
+            StudyMode.DUE_REVIEW -> "Ôn tập hôm nay"
+        }
     }
 
     Scaffold(
@@ -280,40 +284,18 @@ fun StudyScreen(
                 }
 
                 uiState.isSessionFinished -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = StatusSuccess,
-                            modifier = Modifier.size(72.dp)
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "Hoàn thành phiên học!",
-                            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onBackground,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Bạn đã hoàn thành ${uiState.queue.size} lượt thẻ trong phiên này.",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(24.dp))
-                        MemoraPrimaryButton(
-                            text = "Về Trang chính",
-                            onClick = onFinishSession,
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                    val reviewedCount = if (uiState.totalReviewedCount > 0) {
+                        uiState.totalReviewedCount
+                    } else {
+                        uiState.queue.size
                     }
+                    SessionSummaryScreen(
+                        reviewedCardsCount = reviewedCount,
+                        tomorrowDueCount = uiState.tomorrowDueCount,
+                        totalStudyDurationSeconds = uiState.totalStudyDurationSeconds,
+                        onReturnHome = onFinishSession,
+                        onPracticeWithAi = onNavigateToPractice
+                    )
                 }
 
                 uiState.currentCard == null -> {
