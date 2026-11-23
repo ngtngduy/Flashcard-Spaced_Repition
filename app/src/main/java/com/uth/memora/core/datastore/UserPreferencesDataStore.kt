@@ -1,0 +1,110 @@
+package com.uth.memora.core.datastore
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.preferencesDataStore
+import com.uth.memora.core.domain.UserPreferencesRepository
+import com.uth.memora.core.model.ThemeMode
+import com.uth.memora.core.model.UserPreferences
+import com.uth.memora.core.sm2.LearningDayCalculator
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import java.io.IOException
+
+val Context.memoraDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = UserPreferencesDataStore.DATASTORE_NAME
+)
+
+/**
+ * Hiện thực [UserPreferencesRepository] dựa trên Jetpack DataStore Preferences (Mục 10.2, 11 & 13).
+ */
+class UserPreferencesDataStore(
+    private val dataStore: DataStore<Preferences>,
+    private val learningDayProvider: () -> Long = { LearningDayCalculator.toLearningDay() }
+) : UserPreferencesRepository {
+
+    constructor(context: Context) : this(context.applicationContext.memoraDataStore)
+
+    override fun observeUserPreferences(): Flow<UserPreferences> =
+        dataStore.data
+            .catch { exception ->
+                if (exception is IOException) {
+                    emit(emptyPreferences())
+                } else {
+                    throw exception
+                }
+            }
+            .map { prefs -> mapPreferences(prefs) }
+
+    override suspend fun getUserPreferences(): UserPreferences =
+        observeUserPreferences().first()
+
+    override suspend fun setThemeMode(mode: ThemeMode): Result<Unit> = runCatching {
+        dataStore.edit { prefs ->
+            prefs[PreferenceKeys.THEME_MODE] = mode.name
+        }
+    }
+
+    override suspend fun setDailyNewCardsLimit(limit: Int): Result<Unit> = runCatching {
+        val clamped = limit.coerceIn(
+            UserPreferences.MIN_DAILY_NEW_CARDS,
+            UserPreferences.MAX_DAILY_NEW_CARDS
+        )
+        dataStore.edit { prefs ->
+            prefs[PreferenceKeys.DAILY_NEW_CARDS_LIMIT] = clamped
+        }
+    }
+
+    override suspend fun setDailyReminder(
+        enabled: Boolean,
+        hour: Int,
+        minute: Int
+    ): Result<Unit> = Result.success(Unit)
+
+    override suspend fun setSoundEnabled(enabled: Boolean): Result<Unit> = Result.success(Unit)
+
+    override suspend fun setOnboardingCompleted(completed: Boolean): Result<Unit> =
+        Result.success(Unit)
+
+    override suspend fun updateStreak(
+        streak: Int,
+        isFrozen: Boolean,
+        lastStudyLearningDay: Long?,
+        lastFreezeUsedDay: Long?
+    ): Result<Unit> = Result.success(Unit)
+
+    override suspend fun consumeAutoFillQuota(): Result<Int> =
+        Result.success(UserPreferences.DEFAULT_AI_AUTO_FILL_LIMIT)
+
+    override suspend fun consumeSentenceGradingQuota(): Result<Int> =
+        Result.success(UserPreferences.DEFAULT_AI_SENTENCE_LIMIT)
+
+    override suspend fun resetDailyQuotasIfNeeded(currentEpochDay: Long): Result<Unit> =
+        Result.success(Unit)
+
+    override suspend fun setLastSyncedAtMillis(timestampMillis: Long): Result<Unit> =
+        Result.success(Unit)
+
+    private fun mapPreferences(prefs: Preferences): UserPreferences {
+        val themeName = prefs[PreferenceKeys.THEME_MODE]
+        val themeMode = ThemeMode.entries.firstOrNull { it.name == themeName } ?: ThemeMode.SYSTEM
+
+        val dailyLimit = (prefs[PreferenceKeys.DAILY_NEW_CARDS_LIMIT]
+            ?: UserPreferences.DEFAULT_DAILY_NEW_CARDS)
+            .coerceIn(UserPreferences.MIN_DAILY_NEW_CARDS, UserPreferences.MAX_DAILY_NEW_CARDS)
+
+        return UserPreferences(
+            themeMode = themeMode,
+            dailyNewCardsLimit = dailyLimit
+        )
+    }
+
+    companion object {
+        const val DATASTORE_NAME = "memora_prefs"
+    }
+}
