@@ -29,6 +29,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -295,23 +296,26 @@ fun StudyScreen(
                         MemoraLinearProgressBar(progress = uiState.progressFraction)
                     }
 
-                    // Thẻ lật 3D (FlipCard)
-                    FlipCard(
-                        isFlipped = uiState.isFlipped,
-                        onFlip = onFlipCard,
-                        front = {
-                            CardFront(
-                                card = currentCard,
-                                onSpeakClick = { onSpeakWord(currentCard.word) }
-                            )
-                        },
-                        back = {
-                            CardBack(
-                                card = currentCard,
-                                onSpeakClick = { onSpeakWord(currentCard.word) }
-                            )
-                        }
-                    )
+                    // Thẻ lật 3D (FlipCard) đặt trong key(currentCard.id, currentIndex)
+                    // để khi sang thẻ mới luôn hiện ngay mặt trước (rotationY = 0f), không bị lộ mặt sau trong lúc xoay về
+                    key(currentCard.id, uiState.currentIndex) {
+                        FlipCard(
+                            isFlipped = uiState.isFlipped,
+                            onFlip = onFlipCard,
+                            front = {
+                                CardFront(
+                                    card = currentCard,
+                                    onSpeakClick = { onSpeakWord(currentCard.word) }
+                                )
+                            },
+                            back = {
+                                CardBack(
+                                    card = currentCard,
+                                    onSpeakClick = { onSpeakWord(currentCard.word) }
+                                )
+                            }
+                        )
+                    }
 
                     // Hàng công cụ lật thẻ nhanh (Figma 2059:424 & 2059:765)
                     Row(

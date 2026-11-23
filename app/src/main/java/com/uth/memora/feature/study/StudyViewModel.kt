@@ -120,10 +120,16 @@ class StudyViewModel(
     }
 
     /**
-     * Đặt lại mốc thời gian bắt đầu xem thẻ (cardShownAtMillis) mỗi khi hiển thị thẻ mới (Mục 10.2).
+     * Đặt lại mốc thời gian bắt đầu xem thẻ (cardShownAtMillis) và đóng mặt sau (isFlipped = false)
+     * mỗi khi chuyển sang thẻ mới hoặc hoàn tác (Mục 6.5, 6.6 & 10.2).
      */
     fun onCardShown(nowMillis: Long = System.currentTimeMillis()) {
-        _uiState.update { it.copy(cardShownAtMillis = nowMillis) }
+        _uiState.update {
+            it.copy(
+                isFlipped = false,
+                cardShownAtMillis = nowMillis
+            )
+        }
     }
 
     /**
