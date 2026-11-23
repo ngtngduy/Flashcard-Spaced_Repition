@@ -211,6 +211,8 @@ fun StudyScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     onUndoRating: () -> Unit = {},
+    onContinueNextChunk: () -> Unit = {},
+    onPauseFromIntermission: () -> Unit = onFinishSession,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() }
 ) {
     val screenTitle = when (uiState.studyMode) {
@@ -222,15 +224,17 @@ fun StudyScreen(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            AppHeader(
-                title = screenTitle,
-                subtitle = if (uiState.queue.isNotEmpty() && !uiState.isSessionFinished) {
-                    "${uiState.queue.size} thẻ trong phiên"
-                } else {
-                    null
-                },
-                onBack = onBack
-            )
+            if (!uiState.isIntermissionPending) {
+                AppHeader(
+                    title = screenTitle,
+                    subtitle = if (uiState.queue.isNotEmpty() && !uiState.isSessionFinished) {
+                        "${uiState.queue.size} thẻ trong chặng"
+                    } else {
+                        null
+                    },
+                    onBack = onBack
+                )
+            }
         },
         snackbarHost = {
             SnackbarHost(hostState = snackbarHostState)
@@ -263,6 +267,16 @@ fun StudyScreen(
                             onActionClick = onRetry
                         )
                     }
+                }
+
+                uiState.isIntermissionPending -> {
+                    IntermissionScreen(
+                        completedChunk = uiState.currentChunkIndex + 1,
+                        totalChunks = uiState.totalChunks,
+                        completedCardsCount = uiState.queue.size,
+                        onContinueNextChunk = onContinueNextChunk,
+                        onPauseSession = onPauseFromIntermission
+                    )
                 }
 
                 uiState.isSessionFinished -> {

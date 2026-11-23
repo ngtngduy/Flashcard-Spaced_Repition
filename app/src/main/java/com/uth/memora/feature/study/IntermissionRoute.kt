@@ -2,8 +2,11 @@ package com.uth.memora.feature.study
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import com.uth.memora.feature.common.PlaceholderScreen
 
+/**
+ * Route điều hướng độc lập cho màn hình Nghỉ giữa chặng (Figma 2241:113 & Mục 9.2).
+ * Giữ nguyên chữ ký hàm để tương thích với MemoraNavHost.kt.
+ */
 @Composable
 fun IntermissionRoute(
     deckId: String,
@@ -11,10 +14,12 @@ fun IntermissionRoute(
     onFinishEarly: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    PlaceholderScreen(
-        title = "Nghỉ giữa chặng (Anti-burnout Break)",
-        owner = "Người 2 – UI & Luồng học",
-        description = "Figma 2241:113 · Giao diện nền tối #121212, biểu tượng tách cà phê, thẻ tiến độ và nút \"Tiếp tục học ngay\".",
-        modifier = modifier
+    IntermissionScreen(
+        completedChunk = 1,
+        totalChunks = 2,
+        completedCardsCount = 15,
+        modifier = modifier,
+        onContinueNextChunk = onResumeStudy,
+        onPauseSession = onFinishEarly
     )
 }
