@@ -64,12 +64,27 @@ class UserPreferencesDataStore(
         enabled: Boolean,
         hour: Int,
         minute: Int
-    ): Result<Unit> = Result.success(Unit)
+    ): Result<Unit> = runCatching {
+        val clampedHour = hour.coerceIn(0, 23)
+        val clampedMinute = minute.coerceIn(0, 59)
+        dataStore.edit { prefs ->
+            prefs[PreferenceKeys.REMINDER_ENABLED] = enabled
+            prefs[PreferenceKeys.REMINDER_HOUR] = clampedHour
+            prefs[PreferenceKeys.REMINDER_MINUTE] = clampedMinute
+        }
+    }
 
-    override suspend fun setSoundEnabled(enabled: Boolean): Result<Unit> = Result.success(Unit)
+    override suspend fun setSoundEnabled(enabled: Boolean): Result<Unit> = runCatching {
+        dataStore.edit { prefs ->
+            prefs[PreferenceKeys.SOUND_ENABLED] = enabled
+        }
+    }
 
-    override suspend fun setOnboardingCompleted(completed: Boolean): Result<Unit> =
-        Result.success(Unit)
+    override suspend fun setOnboardingCompleted(completed: Boolean): Result<Unit> = runCatching {
+        dataStore.edit { prefs ->
+            prefs[PreferenceKeys.ONBOARDING_COMPLETED] = completed
+        }
+    }
 
     override suspend fun updateStreak(
         streak: Int,
@@ -98,9 +113,24 @@ class UserPreferencesDataStore(
             ?: UserPreferences.DEFAULT_DAILY_NEW_CARDS)
             .coerceIn(UserPreferences.MIN_DAILY_NEW_CARDS, UserPreferences.MAX_DAILY_NEW_CARDS)
 
+        val reminderEnabled = prefs[PreferenceKeys.REMINDER_ENABLED] ?: true
+        val reminderHour = (prefs[PreferenceKeys.REMINDER_HOUR]
+            ?: UserPreferences.DEFAULT_REMINDER_HOUR)
+            .coerceIn(0, 23)
+        val reminderMinute = (prefs[PreferenceKeys.REMINDER_MINUTE]
+            ?: UserPreferences.DEFAULT_REMINDER_MINUTE)
+            .coerceIn(0, 59)
+        val soundEnabled = prefs[PreferenceKeys.SOUND_ENABLED] ?: true
+        val onboardingCompleted = prefs[PreferenceKeys.ONBOARDING_COMPLETED] ?: false
+
         return UserPreferences(
             themeMode = themeMode,
-            dailyNewCardsLimit = dailyLimit
+            dailyNewCardsLimit = dailyLimit,
+            reminderHour = reminderHour,
+            reminderMinute = reminderMinute,
+            isReminderEnabled = reminderEnabled,
+            isSoundEnabled = soundEnabled,
+            isOnboardingCompleted = onboardingCompleted
         )
     }
 
