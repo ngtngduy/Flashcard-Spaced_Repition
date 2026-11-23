@@ -1,9 +1,12 @@
 package com.uth.memora.integration.ai
 
+import com.uth.memora.core.domain.AutoFillCardData
 import com.uth.memora.core.model.AiEvaluationResult
+import com.uth.memora.core.model.PartOfSpeech
+import java.util.Locale
 
 /**
- * Ngoại lệ đánh dấu phản hồi JSON từ Gemini AI sai định dạng hoặc thiếu trường bắt buộc (Mục 6.7 & 9.5).
+ * Ngoại lệ đánh dấu phản hồi JSON từ Gemini AI sai định dạng hoặc thiếu trường bắt buộc (Mục 6.3, 6.7 & 9.5).
  */
 class AiJsonParseException(
     message: String,
@@ -12,13 +15,13 @@ class AiJsonParseException(
 
 /**
  * Bộ phân tích JSON thuần Kotlin chuẩn RFC 8259 (không phụ thuộc `org.json` hay thư viện ngoài)
- * để chuyển phản hồi từ Gemini AI thành [AiEvaluationResult], chạy ổn định cả trên JVM Unit Test
- * lẫn thiết bị Android (Mục 6.7 & 9.5).
+ * để chuyển phản hồi từ Gemini AI thành [AiEvaluationResult] (chấm câu) và [AutoFillCardData]
+ * (tự điền thẻ), chạy ổn định cả trên JVM Unit Test lẫn thiết bị Android (Mục 6.3, 6.7, 9.5 & 11).
  *
  * Hỗ trợ:
  * - Gỡ vỏ bọc markdown (ví dụ ```json ... ```) hoặc văn bản thừa bao quanh JSON.
- * - Đọc ưu tiên khóa `snake_case` theo [GradingPrompt] và fallback sang `camelCase`.
- * - Giới hạn điểm số `score` trong đoạn `0f..10f`.
+ * - Đọc ưu tiên khóa chuẩn theo [GradingPrompt] / [AutoFillPrompt] và fallback khóa tương đương.
+ * - Giới hạn điểm số `score` trong đoạn `0f..10f` và chuẩn hóa loại từ sang [PartOfSpeech].
  */
 object AiJsonParser {
 
@@ -32,8 +35,18 @@ object AiJsonParser {
     private const val FALLBACK_KEY_CORRECTED_SENTENCE: String = "correctedSentence"
     private const val FALLBACK_KEY_NATURAL_ALTERNATIVE: String = "naturalAlternative"
 
+    private const val FALLBACK_KEY_IPA: String = "ipa"
+    private const val FALLBACK_KEY_PART_OF_SPEECH_SNAKE: String = "part_of_speech"
+    private const val FALLBACK_KEY_POS: String = "pos"
+    private const val FALLBACK_KEY_MEANING_VI_SNAKE: String = "meaning_vi"
+    private const val FALLBACK_KEY_MEANING_VI_CAMEL: String = "meaningVi"
+    private const val FALLBACK_KEY_EXAMPLE_SNAKE: String = "example_sentence"
+    private const val FALLBACK_KEY_EXAMPLE_CAMEL: String = "exampleSentence"
+
     private const val ERROR_INVALID_FORMAT_VI: String =
         "Phản hồi AI không đúng định dạng JSON chuẩn. Vui lòng thử chấm lại."
+    private const val ERROR_AUTO_FILL_INVALID_FORMAT_VI: String =
+        "Phản hồi AI không đúng định dạng JSON chuẩn. Vui lòng thử gợi ý lại."
 
     private val MARKDOWN_FENCE_REGEX = Regex(
         pattern = "```(?:json)?\\s*([\\s\\S]*?)\\s*```",
@@ -41,6 +54,13 @@ object AiJsonParser {
     )
 
     private val CEFR_EXTRACTION_REGEX = Regex("\\b(A1|A2|B1|B2|C1|C2)\\b")
+    private val WHITESPACE_REGEX = Regex("\\s+")
+    private val NOUN_WORD_REGEX = Regex("\\bnouns?\\b")
+    private val VERB_WORD_REGEX = Regex("\\bverbs?\\b")
+    private val ADJECTIVE_WORD_REGEX = Regex("\\b(?:adjectives?|adj)\\b")
+    private val ADVERB_WORD_REGEX = Regex("\\b(?:adverbs?|adv)\\b")
+    private val PREPOSITION_WORD_REGEX = Regex("\\b(?:prepositions?|prep)\\b")
+    private val CONJUNCTION_WORD_REGEX = Regex("\\b(?:conjunctions?|conj)\\b")
 
     /**
      * Phân tích chuỗi phản hồi thô từ Gemini AI thành [AiEvaluationResult] (Mục 6.7).
@@ -115,6 +135,129 @@ object AiJsonParser {
                 naturalAlternative = naturalAlternative
             )
         )
+    }
+
+    /**
+     * Phân tích chuỗi JSON phản hồi gợi ý tự điền thẻ học từ Gemini AI thành [AutoFillCardData]
+     * (Mục 6.3 & 11).
+     *
+     * Hỗ trợ gỡ vỏ bọc markdown, đọc fallback khóa snake_case/camelCase, dùng [fallbackWord]
+     * khi JSON thiếu hoặc trống khóa `word`, và chuẩn hóa loại từ qua [normalizePartOfSpeech].
+     */
+    fun parseAutoFillJson(
+        rawJson: String?,
+        fallbackWord: String
+    ): Result<AutoFillCardData> {
+        if (rawJson.isNullOrBlank()) {
+            return Result.failure(
+                AiJsonParseException("AI trả về nội dung trống. Vui lòng thử gợi ý lại.")
+            )
+        }
+
+        val cleanedJson = extractJsonObject(rawJson)
+        if (cleanedJson.isBlank()) {
+            return Result.failure(AiJsonParseException(ERROR_AUTO_FILL_INVALID_FORMAT_VI))
+        }
+
+        val jsonObject = try {
+            PureJsonReader(cleanedJson).parseRootObject()
+        } catch (e: AiJsonParseException) {
+            return Result.failure(AiJsonParseException(ERROR_AUTO_FILL_INVALID_FORMAT_VI, e))
+        }
+
+        val word = jsonObject.optNonBlankString(AutoFillPrompt.KEY_WORD)
+            ?: fallbackWord.trim().takeIf { it.isNotEmpty() }
+            ?: return Result.failure(
+                AiJsonParseException("Phản hồi AI thiếu từ vựng tiếng Anh.")
+            )
+
+        val meaning = jsonObject.optNonBlankString(
+            AutoFillPrompt.KEY_MEANING,
+            FALLBACK_KEY_MEANING_VI_SNAKE,
+            FALLBACK_KEY_MEANING_VI_CAMEL
+        ) ?: return Result.failure(
+            AiJsonParseException("Phản hồi AI thiếu nghĩa tiếng Việt của từ.")
+        )
+
+        val phonetic = jsonObject.optNonBlankString(
+            AutoFillPrompt.KEY_PHONETIC,
+            FALLBACK_KEY_IPA
+        ).orEmpty()
+
+        val rawPartOfSpeech = jsonObject.optNonBlankString(
+            AutoFillPrompt.KEY_PART_OF_SPEECH,
+            FALLBACK_KEY_PART_OF_SPEECH_SNAKE,
+            FALLBACK_KEY_POS
+        )
+        val partOfSpeech = normalizePartOfSpeech(rawPartOfSpeech)
+
+        val example = jsonObject.optNonBlankString(
+            AutoFillPrompt.KEY_EXAMPLE,
+            FALLBACK_KEY_EXAMPLE_SNAKE,
+            FALLBACK_KEY_EXAMPLE_CAMEL
+        ).orEmpty()
+
+        return Result.success(
+            AutoFillCardData(
+                word = word,
+                phonetic = phonetic,
+                partOfSpeech = partOfSpeech,
+                meaning = meaning,
+                example = example
+            )
+        )
+    }
+
+    /**
+     * Chuẩn hóa chuỗi loại từ (tiếng Anh, viết tắt từ điển hoặc tiếng Việt, không phân biệt hoa thường)
+     * sang [PartOfSpeech]; mặc định trả về [PartOfSpeech.OTHER] nếu không nhận diện được (Mục 6.3 & 11).
+     */
+    fun normalizePartOfSpeech(raw: String?): PartOfSpeech {
+        val normalized = raw
+            ?.trim()
+            ?.lowercase(Locale.ROOT)
+            ?.replace(WHITESPACE_REGEX, " ")
+            ?.trim('(', ')', '[', ']', '"', '\'', ' ')
+            ?.trimEnd('.')
+            ?.trim()
+            ?: return PartOfSpeech.OTHER
+
+        if (normalized.isEmpty()) return PartOfSpeech.OTHER
+
+        // 1. Khớp trực tiếp các tên chuẩn, ký hiệu viết tắt và nhãn tiếng Việt phổ biến
+        when (normalized) {
+            "noun", "nouns", "n", "danh từ", "danh tu" -> return PartOfSpeech.NOUN
+            "verb", "verbs", "v", "động từ", "dong tu" -> return PartOfSpeech.VERB
+            "adjective", "adjectives", "adj", "tính từ", "tinh tu" -> return PartOfSpeech.ADJECTIVE
+            "adverb", "adverbs", "adv", "trạng từ", "trang tu" -> return PartOfSpeech.ADVERB
+            "preposition", "prepositions", "prep", "giới từ", "gioi tu" -> return PartOfSpeech.PREPOSITION
+            "conjunction", "conjunctions", "conj", "liên từ", "lien tu" -> return PartOfSpeech.CONJUNCTION
+            "other", "khác", "khac" -> return PartOfSpeech.OTHER
+        }
+
+        // 2. Fallback cho chuỗi kết hợp (VD: "noun (danh từ)", "phrasal verb", "uncountable noun")
+        // Kiểm tra ADVERB trước VERB và dùng ranh giới từ (\b) để tránh khớp nhầm "pronoun" -> NOUN
+        return when {
+            normalized.contains("trạng từ") || normalized.contains("trang tu") ||
+                ADVERB_WORD_REGEX.containsMatchIn(normalized) -> PartOfSpeech.ADVERB
+
+            normalized.contains("tính từ") || normalized.contains("tinh tu") ||
+                ADJECTIVE_WORD_REGEX.containsMatchIn(normalized) -> PartOfSpeech.ADJECTIVE
+
+            normalized.contains("giới từ") || normalized.contains("gioi tu") ||
+                PREPOSITION_WORD_REGEX.containsMatchIn(normalized) -> PartOfSpeech.PREPOSITION
+
+            normalized.contains("liên từ") || normalized.contains("lien tu") ||
+                CONJUNCTION_WORD_REGEX.containsMatchIn(normalized) -> PartOfSpeech.CONJUNCTION
+
+            normalized.contains("danh từ") || normalized.contains("danh tu") ||
+                NOUN_WORD_REGEX.containsMatchIn(normalized) -> PartOfSpeech.NOUN
+
+            normalized.contains("động từ") || normalized.contains("dong tu") ||
+                VERB_WORD_REGEX.containsMatchIn(normalized) -> PartOfSpeech.VERB
+
+            else -> PartOfSpeech.OTHER
+        }
     }
 
     /**
