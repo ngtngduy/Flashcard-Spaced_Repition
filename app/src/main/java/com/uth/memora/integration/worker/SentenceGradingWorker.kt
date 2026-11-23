@@ -68,27 +68,29 @@ class SentenceGradingWorker(
             return Result.success()
         }
 
+        var hasUnrecoverableFailure = false
+
         for (sentence in targetSentences) {
             // Chặn sớm nếu dữ liệu retryCount đã vượt ngưỡng thử lại tối đa (Mục 8.2)
             if (sentence.retryCount > MAX_RETRY_ATTEMPTS) {
                 practiceSentenceRepository.saveAiGradingResult(
                     sentenceId = sentence.id,
                     status = SentenceStatus.GRADE_ERROR,
-                    errorMessage = sentence.errorMessage ?: ERROR_MAX_RETRY_VI,
+                    errorMessage = ERROR_GRADE_FAILED_VI,
                     retryCount = MAX_RETRY_ATTEMPTS
                 )
+                hasUnrecoverableFailure = true
                 continue
             }
 
-            // Kiểm tra và trừ hạn mức 20 câu chấm AI mỗi ngày học (Mục 6.7 & 11)
+            // Kiểm tra và trừ hạn mức 20 câu chấm AI mỗi ngày học (Mục 6.7, 9.5 & 11).
+            // Nếu đã hết lượt hôm nay -> giữ nguyên PENDING_GRADE kèm thông báo cho ngày học sau (tự hồi lúc 4:00 sáng).
             val quotaResult = userPreferencesRepository.consumeSentenceGradingQuota()
             if (quotaResult.isFailure) {
-                val quotaMessage = quotaResult.exceptionOrNull()?.message
-                    ?: ERROR_QUOTA_EXCEEDED_VI
                 practiceSentenceRepository.saveAiGradingResult(
                     sentenceId = sentence.id,
-                    status = SentenceStatus.GRADE_ERROR,
-                    errorMessage = quotaMessage,
+                    status = SentenceStatus.PENDING_GRADE,
+                    errorMessage = ERROR_QUOTA_EXCEEDED_VI,
                     retryCount = sentence.retryCount
                 )
                 continue
@@ -128,7 +130,7 @@ class SentenceGradingWorker(
                     )
                 },
                 onFailure = { error ->
-                    // Phân loại lỗi mạng / 429 / timeout / JSON sai định dạng bằng thông báo tiếng Việt (Mục 9.5)
+                    // Phân loại lỗi mạng / 429 / timeout / JSON sai định dạng / thiếu API key (Mục 9.5)
                     val gradingError = GeminiAiGradingService.mapToGradingException(error)
                     val canRetry = gradingError.isRetryable && sentence.retryCount < MAX_RETRY_ATTEMPTS
 
@@ -148,19 +150,20 @@ class SentenceGradingWorker(
                             replaceExisting = true
                         )
                     } else {
-                        // Hết số lần thử lại hoặc lỗi không thể phục hồi -> đánh dấu GRADE_ERROR (Mục 8.2 & 9.5)
+                        // Đã chạm retryCount >= 3 hoặc lỗi không thể phục hồi (thiếu/sai API key) -> GRADE_ERROR (Mục 8.2 & 9.5)
                         practiceSentenceRepository.saveAiGradingResult(
                             sentenceId = sentence.id,
                             status = SentenceStatus.GRADE_ERROR,
-                            errorMessage = gradingError.message,
+                            errorMessage = ERROR_GRADE_FAILED_VI,
                             retryCount = sentence.retryCount
                         )
+                        hasUnrecoverableFailure = true
                     }
                 }
             )
         }
 
-        return Result.success()
+        return if (hasUnrecoverableFailure) Result.failure() else Result.success()
     }
 
     companion object {
@@ -172,10 +175,10 @@ class SentenceGradingWorker(
         const val RETRY_DELAY_ATTEMPT_1_SECONDS = 60L
         const val RETRY_DELAY_ATTEMPT_2_SECONDS = 300L
 
-        private const val ERROR_QUOTA_EXCEEDED_VI =
-            "Bạn đã dùng hết 20 lượt chấm câu AI hôm nay (tự hồi lúc 4:00 sáng)."
-        private const val ERROR_MAX_RETRY_VI =
-            "Không thể chấm câu sau $MAX_RETRY_ATTEMPTS lần thử. Vui lòng bấm Chấm lại khi có mạng ổn định."
+        const val ERROR_GRADE_FAILED_VI =
+            "Chưa thể chấm câu lúc này, bạn bấm Chấm lại nhé."
+        const val ERROR_QUOTA_EXCEEDED_VI =
+            "Bạn đã dùng hết 20 lượt chấm câu AI hôm nay. Câu được giữ Chờ chấm cho ngày học sau (tự hồi lúc 4:00 sáng)."
 
         /**
          * Tính thời gian chờ (giây) theo lịch lùi 15s → 60s → 5 phút trước lần thử lại kế tiếp (Mục 8.2 & 9.5).
