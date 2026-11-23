@@ -8,6 +8,8 @@ import com.uth.memora.core.model.CardState
 import com.uth.memora.core.model.ReviewLog
 import com.uth.memora.core.model.ReviewQuality
 import com.uth.memora.core.model.StudyMode
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,6 +20,7 @@ import kotlinx.coroutines.launch
  * ViewModel điều phối phiên học Flashcard cho cả 2 chế độ:
  * - Học từ mới (StudyMode.NEW_CARDS - Mục 6.5)
  * - Ôn tập đến hạn (StudyMode.DUE_REVIEW - Mục 6.6)
+ * Hỗ trợ hoàn tác (Undo) lượt đánh giá gần nhất trong cửa sổ 5 giây (Mục 9.1).
  */
 class StudyViewModel(
     private val repository: StudySessionRepository,
@@ -40,6 +43,9 @@ class StudyViewModel(
     // Ghi nhớ lượt đánh giá gần nhất có xếp lặp lại thẻ xuống cuối hàng đợi hay không
     private var lastRatingRequeuedCard: Boolean = false
 
+    // Job đếm ngược 5 giây cho cửa sổ Hoàn tác (Undo - Mục 9.1)
+    private var undoCountdownJob: Job? = null
+
     private val normalizedDeckId: String?
         get() = if (deckId == "all" || deckId.isBlank()) null else deckId
 
@@ -51,8 +57,16 @@ class StudyViewModel(
      * Tải hàng đợi thẻ theo chế độ học (NEW_CARDS hoặc DUE_REVIEW - Mục 6.5, 6.6 & 7.6).
      */
     fun loadQueue() {
+        undoCountdownJob?.cancel()
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            _uiState.update {
+                it.copy(
+                    isLoading = true,
+                    canUndo = false,
+                    undoToastMessage = null,
+                    errorMessage = null
+                )
+            }
 
             runCatching {
                 when (studyMode) {
@@ -223,12 +237,82 @@ class StudyViewModel(
                         )
                     }
                 }
+
+                startUndoCountdownWindow()
             }.onFailure { error ->
                 _uiState.update {
                     it.copy(
                         errorMessage = error.message ?: "Không thể lưu kết quả đánh giá thẻ."
                     )
                 }
+            }
+        }
+    }
+
+    /**
+     * Hoàn tác lượt đánh giá gần nhất trong vòng 5 giây (Mục 9.1):
+     * - Gọi repository.undoLastReview() để khôi phục lịch SM-2 cũ của thẻ
+     * - Lùi currentIndex - 1, gỡ bản sao ở cuối hàng đợi (nếu lượt vừa rồi có xếp lặp lại) và hiện lại mặt trước thẻ
+     */
+    fun undoLastRating() {
+        val state = _uiState.value
+        if (!state.canUndo || state.currentIndex <= 0) return
+
+        undoCountdownJob?.cancel()
+        viewModelScope.launch {
+            repository.undoLastReview().onSuccess { restoredCard ->
+                val targetIndex = (state.currentIndex - 1).coerceAtLeast(0)
+                val mutableQueue = state.queue.toMutableList()
+
+                if (lastRatingRequeuedCard && mutableQueue.size > targetIndex + 1) {
+                    mutableQueue.removeAt(mutableQueue.lastIndex)
+                }
+                lastRatingRequeuedCard = false
+
+                if (targetIndex in mutableQueue.indices) {
+                    mutableQueue[targetIndex] = restoredCard
+                }
+
+                val restoredLabels = repository.getButtonPreviewLabels(restoredCard)
+
+                _uiState.update {
+                    it.copy(
+                        queue = mutableQueue,
+                        currentIndex = targetIndex,
+                        isFlipped = false,
+                        previewLabels = restoredLabels,
+                        canUndo = false,
+                        undoToastMessage = null,
+                        isSessionFinished = false,
+                        isIntermissionPending = false,
+                        totalCardsInChunk = mutableQueue.size,
+                        cardShownAtMillis = System.currentTimeMillis()
+                    )
+                }
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(
+                        canUndo = false,
+                        undoToastMessage = null,
+                        errorMessage = error.message ?: "Không thể hoàn tác lượt đánh giá vừa rồi."
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Khởi chạy bộ đếm ngược 5 giây (5000ms) cho phép người học bấm Hoàn tác (Mục 9.1).
+     */
+    private fun startUndoCountdownWindow() {
+        undoCountdownJob?.cancel()
+        undoCountdownJob = viewModelScope.launch {
+            delay(UNDO_WINDOW_MILLIS)
+            _uiState.update {
+                it.copy(
+                    canUndo = false,
+                    undoToastMessage = null
+                )
             }
         }
     }
@@ -242,5 +326,9 @@ class StudyViewModel(
         if (!shouldMark) return card
 
         return repository.markNewCardDisplayed(card.id).getOrDefault(card)
+    }
+
+    companion object {
+        const val UNDO_WINDOW_MILLIS = 5_000L
     }
 }
