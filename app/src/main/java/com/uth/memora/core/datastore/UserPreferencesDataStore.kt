@@ -119,8 +119,10 @@ class UserPreferencesDataStore(
     }
 
     override suspend fun consumeAutoFillQuota(): Result<Int> = runCatching {
+        val todayLearningDay = learningDayProvider()
         var remaining = 0
         dataStore.edit { prefs ->
+            refreshQuotasInPlaceIfNewDay(prefs, todayLearningDay)
             val current = prefs[PreferenceKeys.AI_AUTO_FILL_REMAINING]
                 ?: UserPreferences.DEFAULT_AI_AUTO_FILL_LIMIT
             if (current <= 0) {
@@ -133,8 +135,10 @@ class UserPreferencesDataStore(
     }
 
     override suspend fun consumeSentenceGradingQuota(): Result<Int> = runCatching {
+        val todayLearningDay = learningDayProvider()
         var remaining = 0
         dataStore.edit { prefs ->
+            refreshQuotasInPlaceIfNewDay(prefs, todayLearningDay)
             val current = prefs[PreferenceKeys.AI_SENTENCE_REMAINING]
                 ?: UserPreferences.DEFAULT_AI_SENTENCE_LIMIT
             if (current <= 0) {
@@ -146,8 +150,41 @@ class UserPreferencesDataStore(
         remaining
     }
 
-    override suspend fun resetDailyQuotasIfNeeded(currentEpochDay: Long): Result<Unit> =
-        Result.success(Unit)
+    /**
+     * Đặt lại hạn mức AI (30 lượt Auto-Fill, 20 lượt chấm câu) khi bước sang ngày học mới
+     * theo mốc 4:00 sáng (LearningDayCalculator - Mục 7.4 & 11).
+     */
+    override suspend fun resetDailyQuotasIfNeeded(currentEpochDay: Long): Result<Unit> = runCatching {
+        dataStore.edit { prefs ->
+            val lastResetDay = prefs[PreferenceKeys.LAST_QUOTA_RESET_EPOCH_DAY] ?: 0L
+            if (lastResetDay < currentEpochDay) {
+                prefs[PreferenceKeys.AI_AUTO_FILL_REMAINING] =
+                    UserPreferences.DEFAULT_AI_AUTO_FILL_LIMIT
+                prefs[PreferenceKeys.AI_SENTENCE_REMAINING] =
+                    UserPreferences.DEFAULT_AI_SENTENCE_LIMIT
+                prefs[PreferenceKeys.LAST_QUOTA_RESET_EPOCH_DAY] = currentEpochDay
+            }
+        }
+    }
+
+    suspend fun resetDailyQuotasIfNeeded(): Result<Unit> =
+        resetDailyQuotasIfNeeded(learningDayProvider())
+
+    private fun refreshQuotasInPlaceIfNewDay(
+        prefs: androidx.datastore.preferences.core.MutablePreferences,
+        todayLearningDay: Long
+    ) {
+        val lastResetDay = prefs[PreferenceKeys.LAST_QUOTA_RESET_EPOCH_DAY] ?: 0L
+        if (lastResetDay == 0L) {
+            prefs[PreferenceKeys.LAST_QUOTA_RESET_EPOCH_DAY] = todayLearningDay
+        } else if (lastResetDay < todayLearningDay) {
+            prefs[PreferenceKeys.AI_AUTO_FILL_REMAINING] =
+                UserPreferences.DEFAULT_AI_AUTO_FILL_LIMIT
+            prefs[PreferenceKeys.AI_SENTENCE_REMAINING] =
+                UserPreferences.DEFAULT_AI_SENTENCE_LIMIT
+            prefs[PreferenceKeys.LAST_QUOTA_RESET_EPOCH_DAY] = todayLearningDay
+        }
+    }
 
     override suspend fun setLastSyncedAtMillis(timestampMillis: Long): Result<Unit> = runCatching {
         dataStore.edit { prefs ->
@@ -203,13 +240,23 @@ class UserPreferencesDataStore(
             lastFreezeUsedDay = lastStreakFreezeUsedDay
         )
         val lastSyncedAtMillis = prefs[PreferenceKeys.LAST_SYNCED_AT_MILLIS]
-        val autoFillRemaining = (prefs[PreferenceKeys.AI_AUTO_FILL_REMAINING]
-            ?: UserPreferences.DEFAULT_AI_AUTO_FILL_LIMIT)
-            .coerceIn(0, UserPreferences.DEFAULT_AI_AUTO_FILL_LIMIT)
-        val sentenceRemaining = (prefs[PreferenceKeys.AI_SENTENCE_REMAINING]
-            ?: UserPreferences.DEFAULT_AI_SENTENCE_LIMIT)
-            .coerceIn(0, UserPreferences.DEFAULT_AI_SENTENCE_LIMIT)
         val lastQuotaResetEpochDay = prefs[PreferenceKeys.LAST_QUOTA_RESET_EPOCH_DAY] ?: 0L
+        val isNewDaySinceLastQuotaUse =
+            lastQuotaResetEpochDay in 1 until todayLearningDay
+        val autoFillRemaining = if (isNewDaySinceLastQuotaUse) {
+            UserPreferences.DEFAULT_AI_AUTO_FILL_LIMIT
+        } else {
+            (prefs[PreferenceKeys.AI_AUTO_FILL_REMAINING]
+                ?: UserPreferences.DEFAULT_AI_AUTO_FILL_LIMIT)
+                .coerceIn(0, UserPreferences.DEFAULT_AI_AUTO_FILL_LIMIT)
+        }
+        val sentenceRemaining = if (isNewDaySinceLastQuotaUse) {
+            UserPreferences.DEFAULT_AI_SENTENCE_LIMIT
+        } else {
+            (prefs[PreferenceKeys.AI_SENTENCE_REMAINING]
+                ?: UserPreferences.DEFAULT_AI_SENTENCE_LIMIT)
+                .coerceIn(0, UserPreferences.DEFAULT_AI_SENTENCE_LIMIT)
+        }
 
         return UserPreferences(
             themeMode = themeMode,
