@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.uth.memora.core.domain.StudySessionRepository
 import com.uth.memora.core.model.Card
 import com.uth.memora.core.model.CardState
+import com.uth.memora.core.model.ReviewQuality
 import com.uth.memora.core.model.StudyMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +35,9 @@ class StudyViewModel(
 
     // Lưu các thẻ mới đã được đánh dấu hiển thị lần đầu trong phiên (Mục 6.5)
     private val displayedNewCardIds = mutableSetOf<String>()
+
+    // Ghi nhớ lượt đánh giá gần nhất có xếp lặp lại thẻ xuống cuối hàng đợi hay không
+    private var lastRatingRequeuedCard: Boolean = false
 
     private val normalizedDeckId: String?
         get() = if (deckId == "all" || deckId.isBlank()) null else deckId
@@ -111,6 +115,94 @@ class StudyViewModel(
     fun toggleFlip() {
         _uiState.update { state ->
             if (state.currentCard == null) state else state.copy(isFlipped = !state.isFlipped)
+        }
+    }
+
+    /**
+     * Ghi nhận đánh giá thẻ (2 nút cho NEW_CARDS hoặc 4 nút SM-2 cho DUE_REVIEW - Mục 6.5, 6.6 & 7.2).
+     * Nếu thẻ cần lặp lại trong phiên (bấm Học lại / Chưa nhớ / bước phút LEARNING) thì xếp xuống cuối hàng đợi.
+     */
+    fun submitRating(quality: ReviewQuality) {
+        val state = _uiState.value
+        val currentCard = state.currentCard ?: return
+
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val durationSeconds = ((now - state.cardShownAtMillis) / 1000L)
+                .toInt()
+                .coerceIn(1, 60)
+
+            val intervalLabel = state.previewLabels[quality] ?: when (quality) {
+                ReviewQuality.AGAIN -> if (studyMode == StudyMode.NEW_CARDS) "cuối hàng đợi" else "1 phút"
+                ReviewQuality.HARD -> "10 phút"
+                ReviewQuality.GOOD -> "1 ngày"
+                ReviewQuality.EASY -> "4 ngày"
+            }
+
+            repository.submitCardReview(
+                cardId = currentCard.id,
+                quality = quality,
+                durationValidSeconds = durationSeconds
+            ).onSuccess { updatedCard ->
+                val mutableQueue = state.queue.toMutableList()
+                mutableQueue[state.currentIndex] = updatedCard
+
+                val shouldRepeatInSession = (studyMode == StudyMode.NEW_CARDS && quality == ReviewQuality.AGAIN) ||
+                    updatedCard.state == CardState.LEARNING
+                lastRatingRequeuedCard = shouldRepeatInSession
+                if (shouldRepeatInSession) {
+                    mutableQueue.add(updatedCard)
+                }
+
+                val nextIndex = state.currentIndex + 1
+                val toastText = if (studyMode == StudyMode.NEW_CARDS && quality == ReviewQuality.AGAIN) {
+                    "Đã ghi nhận: Học lại · Xếp cuối hàng đợi"
+                } else {
+                    "Đã ghi nhận: ${quality.labelVi} · Hẹn ôn sau $intervalLabel"
+                }
+
+                if (nextIndex >= mutableQueue.size) {
+                    val tomorrowCount = runCatching {
+                        repository.getTomorrowDueCount(normalizedDeckId)
+                    }.getOrDefault(0)
+
+                    _uiState.update {
+                        it.copy(
+                            queue = mutableQueue,
+                            currentIndex = nextIndex,
+                            isFlipped = false,
+                            canUndo = true,
+                            undoToastMessage = toastText,
+                            isSessionFinished = true,
+                            totalCardsInChunk = mutableQueue.size,
+                            tomorrowDueCount = tomorrowCount
+                        )
+                    }
+                } else {
+                    val nextCard = markDisplayedIfNew(mutableQueue[nextIndex])
+                    mutableQueue[nextIndex] = nextCard
+                    val nextLabels = repository.getButtonPreviewLabels(nextCard)
+
+                    _uiState.update {
+                        it.copy(
+                            queue = mutableQueue,
+                            currentIndex = nextIndex,
+                            isFlipped = false,
+                            previewLabels = nextLabels,
+                            canUndo = true,
+                            undoToastMessage = toastText,
+                            totalCardsInChunk = mutableQueue.size,
+                            cardShownAtMillis = System.currentTimeMillis()
+                        )
+                    }
+                }
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(
+                        errorMessage = error.message ?: "Không thể lưu kết quả đánh giá thẻ."
+                    )
+                }
+            }
         }
     }
 
