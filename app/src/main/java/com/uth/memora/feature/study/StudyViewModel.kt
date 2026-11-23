@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.uth.memora.core.domain.StudySessionRepository
 import com.uth.memora.core.model.Card
 import com.uth.memora.core.model.CardState
+import com.uth.memora.core.model.ReviewLog
 import com.uth.memora.core.model.ReviewQuality
 import com.uth.memora.core.model.StudyMode
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -119,6 +120,25 @@ class StudyViewModel(
     }
 
     /**
+     * Đặt lại mốc thời gian bắt đầu xem thẻ (cardShownAtMillis) mỗi khi hiển thị thẻ mới (Mục 10.2).
+     */
+    fun onCardShown(nowMillis: Long = System.currentTimeMillis()) {
+        _uiState.update { it.copy(cardShownAtMillis = nowMillis) }
+    }
+
+    /**
+     * Tính thời gian xem thẻ hợp lệ từ 1 đến 60 giây để không cộng thời gian bỏ máy (Mục 10.2).
+     */
+    private fun calculateCardViewDurationSeconds(
+        cardShownAtMillis: Long,
+        nowMillis: Long = System.currentTimeMillis()
+    ): Int {
+        return ((nowMillis - cardShownAtMillis) / 1000L)
+            .toInt()
+            .coerceIn(1, ReviewLog.MAX_SECONDS_PER_REVIEW)
+    }
+
+    /**
      * Ghi nhận đánh giá thẻ (2 nút cho NEW_CARDS hoặc 4 nút SM-2 cho DUE_REVIEW - Mục 6.5, 6.6 & 7.2).
      * Nếu thẻ cần lặp lại trong phiên (bấm Học lại / Chưa nhớ / bước phút LEARNING) thì xếp xuống cuối hàng đợi.
      */
@@ -128,9 +148,10 @@ class StudyViewModel(
 
         viewModelScope.launch {
             val now = System.currentTimeMillis()
-            val durationSeconds = ((now - state.cardShownAtMillis) / 1000L)
-                .toInt()
-                .coerceIn(1, 60)
+            val durationSeconds = calculateCardViewDurationSeconds(
+                cardShownAtMillis = state.cardShownAtMillis,
+                nowMillis = now
+            )
 
             val intervalLabel = state.previewLabels[quality] ?: when (quality) {
                 ReviewQuality.AGAIN -> if (studyMode == StudyMode.NEW_CARDS) "cuối hàng đợi" else "1 phút"
