@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStore
 import com.uth.memora.core.domain.UserPreferencesRepository
+import com.uth.memora.core.domain.logic.StreakCalculator
 import com.uth.memora.core.model.ThemeMode
 import com.uth.memora.core.model.UserPreferences
 import com.uth.memora.core.sm2.LearningDayCalculator
@@ -91,7 +92,31 @@ class UserPreferencesDataStore(
         isFrozen: Boolean,
         lastStudyLearningDay: Long?,
         lastFreezeUsedDay: Long?
-    ): Result<Unit> = Result.success(Unit)
+    ): Result<Unit> = runCatching {
+        dataStore.edit { prefs ->
+            prefs[PreferenceKeys.CURRENT_STREAK] = streak.coerceAtLeast(0)
+            prefs[PreferenceKeys.IS_STREAK_FREEZE_ACTIVE] = isFrozen
+            if (lastStudyLearningDay != null) {
+                prefs[PreferenceKeys.LAST_STUDY_LEARNING_DAY] = lastStudyLearningDay
+            }
+            if (lastFreezeUsedDay != null) {
+                prefs[PreferenceKeys.LAST_STREAK_FREEZE_USED_DAY] = lastFreezeUsedDay
+            }
+            val effectiveFreezeUsedDay =
+                lastFreezeUsedDay ?: prefs[PreferenceKeys.LAST_STREAK_FREEZE_USED_DAY]
+            val currentAvailable = prefs[PreferenceKeys.HAS_STREAK_FREEZE_AVAILABLE] ?: true
+            val referenceDay = lastStudyLearningDay ?: learningDayProvider()
+            prefs[PreferenceKeys.HAS_STREAK_FREEZE_AVAILABLE] = if (isFrozen) {
+                false
+            } else {
+                StreakCalculator.isFreezeAvailableOn(
+                    todayLearningDay = referenceDay,
+                    isFreezeAvailable = currentAvailable,
+                    lastFreezeUsedDay = effectiveFreezeUsedDay
+                )
+            }
+        }
+    }
 
     override suspend fun consumeAutoFillQuota(): Result<Int> =
         Result.success(UserPreferences.DEFAULT_AI_AUTO_FILL_LIMIT)
@@ -102,10 +127,32 @@ class UserPreferencesDataStore(
     override suspend fun resetDailyQuotasIfNeeded(currentEpochDay: Long): Result<Unit> =
         Result.success(Unit)
 
-    override suspend fun setLastSyncedAtMillis(timestampMillis: Long): Result<Unit> =
-        Result.success(Unit)
+    override suspend fun setLastSyncedAtMillis(timestampMillis: Long): Result<Unit> = runCatching {
+        dataStore.edit { prefs ->
+            prefs[PreferenceKeys.LAST_SYNCED_AT_MILLIS] = timestampMillis
+        }
+    }
+
+    /**
+     * Xóa trạng thái phiên học và hạn mức cá nhân khi người dùng đăng xuất (Mục 6.2 & 9.7),
+     * giữ lại cài đặt thiết bị (giao diện Sáng/Tối, âm thanh, cờ đã xem Onboarding).
+     */
+    suspend fun clearSessionOnSignOut(): Result<Unit> = runCatching {
+        dataStore.edit { prefs ->
+            prefs.remove(PreferenceKeys.CURRENT_STREAK)
+            prefs.remove(PreferenceKeys.IS_STREAK_FREEZE_ACTIVE)
+            prefs.remove(PreferenceKeys.HAS_STREAK_FREEZE_AVAILABLE)
+            prefs.remove(PreferenceKeys.LAST_STUDY_LEARNING_DAY)
+            prefs.remove(PreferenceKeys.LAST_STREAK_FREEZE_USED_DAY)
+            prefs.remove(PreferenceKeys.AI_AUTO_FILL_REMAINING)
+            prefs.remove(PreferenceKeys.AI_SENTENCE_REMAINING)
+            prefs.remove(PreferenceKeys.LAST_QUOTA_RESET_EPOCH_DAY)
+            prefs.remove(PreferenceKeys.LAST_SYNCED_AT_MILLIS)
+        }
+    }
 
     private fun mapPreferences(prefs: Preferences): UserPreferences {
+        val todayLearningDay = learningDayProvider()
         val themeName = prefs[PreferenceKeys.THEME_MODE]
         val themeMode = ThemeMode.entries.firstOrNull { it.name == themeName } ?: ThemeMode.SYSTEM
 
@@ -123,6 +170,18 @@ class UserPreferencesDataStore(
         val soundEnabled = prefs[PreferenceKeys.SOUND_ENABLED] ?: true
         val onboardingCompleted = prefs[PreferenceKeys.ONBOARDING_COMPLETED] ?: false
 
+        val currentStreak = (prefs[PreferenceKeys.CURRENT_STREAK] ?: 0).coerceAtLeast(0)
+        val isStreakFreezeActive = prefs[PreferenceKeys.IS_STREAK_FREEZE_ACTIVE] ?: false
+        val lastStudyLearningDay = prefs[PreferenceKeys.LAST_STUDY_LEARNING_DAY]
+        val lastStreakFreezeUsedDay = prefs[PreferenceKeys.LAST_STREAK_FREEZE_USED_DAY]
+        val storedFreezeAvailable = prefs[PreferenceKeys.HAS_STREAK_FREEZE_AVAILABLE] ?: true
+        val hasStreakFreezeAvailable = StreakCalculator.isFreezeAvailableOn(
+            todayLearningDay = todayLearningDay,
+            isFreezeAvailable = storedFreezeAvailable,
+            lastFreezeUsedDay = lastStreakFreezeUsedDay
+        )
+        val lastSyncedAtMillis = prefs[PreferenceKeys.LAST_SYNCED_AT_MILLIS]
+
         return UserPreferences(
             themeMode = themeMode,
             dailyNewCardsLimit = dailyLimit,
@@ -130,7 +189,13 @@ class UserPreferencesDataStore(
             reminderMinute = reminderMinute,
             isReminderEnabled = reminderEnabled,
             isSoundEnabled = soundEnabled,
-            isOnboardingCompleted = onboardingCompleted
+            isOnboardingCompleted = onboardingCompleted,
+            currentStreak = currentStreak,
+            isStreakFreezeActive = isStreakFreezeActive,
+            hasStreakFreezeAvailable = hasStreakFreezeAvailable,
+            lastStudyLearningDay = lastStudyLearningDay,
+            lastStreakFreezeUsedDay = lastStreakFreezeUsedDay,
+            lastSyncedAtMillis = lastSyncedAtMillis
         )
     }
 
