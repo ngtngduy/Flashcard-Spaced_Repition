@@ -24,11 +24,16 @@ import java.util.concurrent.TimeUnit
  * - Đọc `sentence_id` từ `inputData`; nếu không truyền thì xử lý toàn bộ câu đang `PENDING_GRADE`.
  * - Kiểm tra hạn mức 20 câu/ngày qua `UserPreferencesRepository.consumeSentenceGradingQuota()`.
  * - Chấm câu bằng `AiGradingService` và lưu kết quả qua `PracticeSentenceRepository` (không import `core/database`).
+ * - Tự lập lịch thử lại qua `GradingScheduler` theo mốc lùi 15s → 60s → 5 phút (tối đa 3 lần thử).
  */
 class SentenceGradingWorker(
     appContext: Context,
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
+
+    private val gradingScheduler: GradingScheduler by lazy {
+        GradingScheduler(applicationContext)
+    }
 
     override suspend fun doWork(): Result {
         val container = (applicationContext as? MemoraApplication)?.container
@@ -63,16 +68,14 @@ class SentenceGradingWorker(
             return Result.success()
         }
 
-        var hasRetryableFailure = false
-
         for (sentence in targetSentences) {
-            // Đã chạm trần số lần thử lại tối đa -> chuyển sang GRADE_ERROR (Mục 8.2)
-            if (sentence.retryCount >= MAX_RETRY_ATTEMPTS) {
+            // Chặn sớm nếu dữ liệu retryCount đã vượt ngưỡng thử lại tối đa (Mục 8.2)
+            if (sentence.retryCount > MAX_RETRY_ATTEMPTS) {
                 practiceSentenceRepository.saveAiGradingResult(
                     sentenceId = sentence.id,
                     status = SentenceStatus.GRADE_ERROR,
                     errorMessage = sentence.errorMessage ?: ERROR_MAX_RETRY_VI,
-                    retryCount = sentence.retryCount
+                    retryCount = MAX_RETRY_ATTEMPTS
                 )
                 continue
             }
@@ -127,30 +130,37 @@ class SentenceGradingWorker(
                 onFailure = { error ->
                     // Phân loại lỗi mạng / 429 / timeout / JSON sai định dạng bằng thông báo tiếng Việt (Mục 9.5)
                     val gradingError = GeminiAiGradingService.mapToGradingException(error)
-                    val nextRetryCount = sentence.retryCount + 1
-                    val canRetry = gradingError.isRetryable && nextRetryCount < MAX_RETRY_ATTEMPTS
+                    val canRetry = gradingError.isRetryable && sentence.retryCount < MAX_RETRY_ATTEMPTS
 
                     if (canRetry) {
+                        // Lưu lại PENDING_GRADE với retryCount tăng thêm 1 rồi tự hẹn chạy lại theo lịch lùi (Mục 8.2)
+                        val delaySeconds = retryDelaySecondsForAttempt(sentence.retryCount)
+                        val nextRetryCount = sentence.retryCount + 1
                         practiceSentenceRepository.saveAiGradingResult(
                             sentenceId = sentence.id,
                             status = SentenceStatus.PENDING_GRADE,
                             errorMessage = gradingError.message,
                             retryCount = nextRetryCount
                         )
-                        hasRetryableFailure = true
+                        gradingScheduler.enqueueSentence(
+                            sentenceId = sentence.id,
+                            initialDelaySeconds = delaySeconds,
+                            replaceExisting = true
+                        )
                     } else {
+                        // Hết số lần thử lại hoặc lỗi không thể phục hồi -> đánh dấu GRADE_ERROR (Mục 8.2 & 9.5)
                         practiceSentenceRepository.saveAiGradingResult(
                             sentenceId = sentence.id,
                             status = SentenceStatus.GRADE_ERROR,
                             errorMessage = gradingError.message,
-                            retryCount = nextRetryCount
+                            retryCount = sentence.retryCount
                         )
                     }
                 }
             )
         }
 
-        return if (hasRetryableFailure) Result.retry() else Result.success()
+        return Result.success()
     }
 
     companion object {
@@ -158,10 +168,31 @@ class SentenceGradingWorker(
         const val KEY_SENTENCE_ID = GradingScheduler.KEY_SENTENCE_ID
         const val MAX_RETRY_ATTEMPTS = PracticeSentence.MAX_RETRY_ATTEMPTS
 
+        const val RETRY_DELAY_ATTEMPT_0_SECONDS = 15L
+        const val RETRY_DELAY_ATTEMPT_1_SECONDS = 60L
+        const val RETRY_DELAY_ATTEMPT_2_SECONDS = 300L
+
         private const val ERROR_QUOTA_EXCEEDED_VI =
             "Bạn đã dùng hết 20 lượt chấm câu AI hôm nay (tự hồi lúc 4:00 sáng)."
         private const val ERROR_MAX_RETRY_VI =
             "Không thể chấm câu sau $MAX_RETRY_ATTEMPTS lần thử. Vui lòng bấm Chấm lại khi có mạng ổn định."
+
+        /**
+         * Tính thời gian chờ (giây) theo lịch lùi 15s → 60s → 5 phút trước lần thử lại kế tiếp (Mục 8.2 & 9.5).
+         * - attempt 0 -> 15 giây
+         * - attempt 1 -> 60 giây
+         * - attempt 2 -> 300 giây (5 phút)
+         */
+        fun retryDelaySecondsForAttempt(retryCount: Int): Long = when (retryCount) {
+            0 -> RETRY_DELAY_ATTEMPT_0_SECONDS
+            1 -> RETRY_DELAY_ATTEMPT_1_SECONDS
+            2 -> RETRY_DELAY_ATTEMPT_2_SECONDS
+            else -> if (retryCount < 0) {
+                RETRY_DELAY_ATTEMPT_0_SECONDS
+            } else {
+                RETRY_DELAY_ATTEMPT_2_SECONDS
+            }
+        }
 
         /**
          * Đăng ký hàng đợi chờ mạng để tự động chấm toàn bộ các câu đang ở trạng thái Chờ chấm (Mục 8.2).
