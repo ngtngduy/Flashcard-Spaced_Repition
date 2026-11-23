@@ -1,9 +1,6 @@
 package com.uth.memora.integration.ai
 
 import com.uth.memora.core.model.AiEvaluationResult
-import org.json.JSONArray
-import org.json.JSONException
-import org.json.JSONObject
 
 /**
  * Ngoại lệ đánh dấu phản hồi JSON từ Gemini AI sai định dạng hoặc thiếu trường bắt buộc (Mục 6.7 & 9.5).
@@ -14,8 +11,9 @@ class AiJsonParseException(
 ) : IllegalArgumentException(message, cause)
 
 /**
- * Bộ phân tích JSON an toàn dùng `org.json.JSONObject` có sẵn trong Android SDK
- * để chuyển phản hồi từ Gemini AI thành [AiEvaluationResult] (Mục 6.7 & 9.5).
+ * Bộ phân tích JSON thuần Kotlin chuẩn RFC 8259 (không phụ thuộc `org.json` hay thư viện ngoài)
+ * để chuyển phản hồi từ Gemini AI thành [AiEvaluationResult], chạy ổn định cả trên JVM Unit Test
+ * lẫn thiết bị Android (Mục 6.7 & 9.5).
  *
  * Hỗ trợ:
  * - Gỡ vỏ bọc markdown (ví dụ ```json ... ```) hoặc văn bản thừa bao quanh JSON.
@@ -26,6 +24,7 @@ object AiJsonParser {
 
     private const val MIN_SCORE: Float = 0f
     private const val MAX_SCORE: Float = 10f
+    private const val MAX_NESTING_DEPTH: Int = 32
 
     private const val FALLBACK_KEY_CEFR_LEVEL: String = "cefrLevel"
     private const val FALLBACK_KEY_FEEDBACK_VI: String = "feedbackVi"
@@ -59,9 +58,9 @@ object AiJsonParser {
         }
 
         val jsonObject = try {
-            JSONObject(cleanedJson)
-        } catch (e: JSONException) {
-            return Result.failure(AiJsonParseException(ERROR_INVALID_FORMAT_VI, e))
+            PureJsonReader(cleanedJson).parseRootObject()
+        } catch (e: AiJsonParseException) {
+            return Result.failure(e)
         }
 
         val score = jsonObject.optScore(GradingPrompt.KEY_SCORE)
@@ -149,9 +148,9 @@ object AiJsonParser {
         return CEFR_EXTRACTION_REGEX.find(upper)?.groupValues?.get(1)
     }
 
-    private fun JSONObject.optScore(key: String): Float? {
-        if (!has(key) || isNull(key)) return null
-        val parsed = when (val value = opt(key)) {
+    private fun Map<String, Any?>.optScore(key: String): Float? {
+        val value = this[key] ?: return null
+        val parsed = when (value) {
             is Number -> value.toDouble()
             is String -> value.trim().replace(',', '.').toDoubleOrNull()
             else -> null
@@ -161,33 +160,23 @@ object AiJsonParser {
         return parsed.toFloat()
     }
 
-    private fun JSONObject.optNonBlankString(vararg keys: String): String? {
+    private fun Map<String, Any?>.optNonBlankString(vararg keys: String): String? {
         for (key in keys) {
-            if (!has(key) || isNull(key)) continue
-            val value = opt(key)
-            if (value is String) {
-                val trimmed = value.trim()
-                if (trimmed.isNotEmpty()) return trimmed
-            }
+            val value = this[key] as? String ?: continue
+            val trimmed = value.trim()
+            if (trimmed.isNotEmpty()) return trimmed
         }
         return null
     }
 
-    private fun JSONObject.optStringList(vararg keys: String): List<String> {
+    private fun Map<String, Any?>.optStringList(vararg keys: String): List<String> {
         for (key in keys) {
-            if (!has(key) || isNull(key)) continue
-            when (val value = opt(key)) {
-                is JSONArray -> {
-                    val result = mutableListOf<String>()
-                    for (index in 0 until value.length()) {
-                        if (!value.isNull(index)) {
-                            val item = value.optString(index, "").trim()
-                            if (item.isNotEmpty()) {
-                                result.add(item)
-                            }
-                        }
+            val value = this[key] ?: continue
+            when (value) {
+                is List<*> -> {
+                    return value.mapNotNull { item ->
+                        (item as? String)?.trim()?.takeIf { it.isNotEmpty() }
                     }
-                    return result
                 }
                 is String -> {
                     val trimmed = value.trim()
@@ -196,5 +185,244 @@ object AiJsonParser {
             }
         }
         return emptyList()
+    }
+
+    /**
+     * Bộ đọc JSON đệ quy thuần Kotlin theo chuẩn RFC 8259 (tương tự cơ chế tự parse của Converters.kt).
+     */
+    private class PureJsonReader(private val source: String) {
+        private var index: Int = 0
+        private var depth: Int = 0
+
+        fun parseRootObject(): Map<String, Any?> {
+            skipWhitespace()
+            val obj = parseObject()
+            skipWhitespace()
+            if (index != source.length) {
+                throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+            }
+            return obj
+        }
+
+        private fun parseValue(): Any? {
+            skipWhitespace()
+            if (index >= source.length) {
+                throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+            }
+            return when (source[index]) {
+                '{' -> parseObject()
+                '[' -> parseArray()
+                '"' -> parseString()
+                't' -> {
+                    consumeLiteral("true")
+                    true
+                }
+                'f' -> {
+                    consumeLiteral("false")
+                    false
+                }
+                'n' -> {
+                    consumeLiteral("null")
+                    null
+                }
+                '-', in '0'..'9' -> parseNumber()
+                else -> throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+            }
+        }
+
+        private fun parseObject(): Map<String, Any?> {
+            enterNestedContainer()
+            try {
+                expectChar('{')
+                skipWhitespace()
+
+                val map = LinkedHashMap<String, Any?>()
+                if (peekChar() == '}') {
+                    index++
+                    return map
+                }
+
+                while (true) {
+                    skipWhitespace()
+                    if (peekChar() != '"') {
+                        throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+                    }
+                    val key = parseString()
+                    skipWhitespace()
+                    expectChar(':')
+                    val value = parseValue()
+                    map[key] = value
+                    skipWhitespace()
+
+                    when (peekChar()) {
+                        ',' -> index++
+                        '}' -> {
+                            index++
+                            return map
+                        }
+                        else -> throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+                    }
+                }
+            } finally {
+                depth--
+            }
+        }
+
+        private fun parseArray(): List<Any?> {
+            enterNestedContainer()
+            try {
+                expectChar('[')
+                skipWhitespace()
+
+                val list = mutableListOf<Any?>()
+                if (peekChar() == ']') {
+                    index++
+                    return list
+                }
+
+                while (true) {
+                    list.add(parseValue())
+                    skipWhitespace()
+
+                    when (peekChar()) {
+                        ',' -> index++
+                        ']' -> {
+                            index++
+                            return list
+                        }
+                        else -> throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+                    }
+                }
+            } finally {
+                depth--
+            }
+        }
+
+        private fun parseString(): String {
+            expectChar('"')
+            val builder = StringBuilder()
+
+            while (index < source.length) {
+                val ch = source[index++]
+                when {
+                    ch == '"' -> return builder.toString()
+                    ch == '\\' -> {
+                        if (index >= source.length) {
+                            throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+                        }
+                        when (source[index++]) {
+                            '"' -> builder.append('"')
+                            '\\' -> builder.append('\\')
+                            '/' -> builder.append('/')
+                            'b' -> builder.append('\b')
+                            'f' -> builder.append('\u000C')
+                            'n' -> builder.append('\n')
+                            'r' -> builder.append('\r')
+                            't' -> builder.append('\t')
+                            'u' -> {
+                                if (index + 4 > source.length) {
+                                    throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+                                }
+                                val hex = source.substring(index, index + 4)
+                                val codePoint = hex.toIntOrNull(16)
+                                    ?: throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+                                builder.append(codePoint.toChar())
+                                index += 4
+                            }
+                            else -> throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+                        }
+                    }
+                    ch.code < 0x20 -> throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+                    else -> builder.append(ch)
+                }
+            }
+
+            throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+        }
+
+        private fun parseNumber(): Double {
+            val start = index
+            if (peekChar() == '-') {
+                index++
+            }
+            if (index >= source.length) {
+                throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+            }
+
+            // Phần nguyên: 0 hoặc [1-9][0-9]*
+            when (source[index]) {
+                '0' -> index++
+                in '1'..'9' -> {
+                    while (index < source.length && source[index] in '0'..'9') {
+                        index++
+                    }
+                }
+                else -> throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+            }
+
+            // Phần thập phân (tùy chọn)
+            if (peekChar() == '.') {
+                index++
+                if (index >= source.length || source[index] !in '0'..'9') {
+                    throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+                }
+                while (index < source.length && source[index] in '0'..'9') {
+                    index++
+                }
+            }
+
+            // Phần mũ khoa học e/E (tùy chọn)
+            val expChar = peekChar()
+            if (expChar == 'e' || expChar == 'E') {
+                index++
+                val sign = peekChar()
+                if (sign == '+' || sign == '-') {
+                    index++
+                }
+                if (index >= source.length || source[index] !in '0'..'9') {
+                    throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+                }
+                while (index < source.length && source[index] in '0'..'9') {
+                    index++
+                }
+            }
+
+            val rawNumber = source.substring(start, index)
+            val parsed = rawNumber.toDoubleOrNull()
+                ?: throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+            if (!parsed.isFinite()) {
+                throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+            }
+            return parsed
+        }
+
+        private fun consumeLiteral(literal: String) {
+            if (!source.startsWith(literal, startIndex = index)) {
+                throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+            }
+            index += literal.length
+        }
+
+        private fun expectChar(expected: Char) {
+            if (index >= source.length || source[index] != expected) {
+                throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+            }
+            index++
+        }
+
+        private fun peekChar(): Char? = if (index < source.length) source[index] else null
+
+        private fun skipWhitespace() {
+            while (index < source.length && source[index].isWhitespace()) {
+                index++
+            }
+        }
+
+        private fun enterNestedContainer() {
+            depth++
+            if (depth > MAX_NESTING_DEPTH) {
+                throw AiJsonParseException(ERROR_INVALID_FORMAT_VI)
+            }
+        }
     }
 }
