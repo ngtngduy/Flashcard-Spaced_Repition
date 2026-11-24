@@ -1,19 +1,52 @@
 package com.uth.memora.feature.decks
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import com.uth.memora.feature.common.PlaceholderScreen
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.uth.memora.memoraViewModelFactory
 
+/**
+ * Điểm vào điều hướng của màn Quản lý Bộ từ (Deck List - Figma 8:323).
+ * Kết nối [DeckListViewModel] thông qua [memoraViewModelFactory] với [DeckListScreen].
+ */
 @Composable
 fun DecksRoute(
     onDeckClick: (String) -> Unit,
     onCreateDeckClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    PlaceholderScreen(
-        title = "Quản lý Bộ từ (Deck List)",
-        owner = "Người 2 – UI & Luồng học",
-        description = "Figma 1:2 / 2101:9 · Danh sách bộ thẻ cá nhân, bộ từ mẫu có sẵn và nút tạo bộ từ mới.",
+    val viewModel: DeckListViewModel = viewModel(
+        factory = memoraViewModelFactory { container ->
+            DeckListViewModel(
+                deckRepository = container.deckRepository,
+                cardRepository = container.cardRepository
+            )
+        }
+    )
+
+    val uiState by viewModel.uiState.collectAsState()
+
+    DeckListScreen(
+        uiState = uiState,
+        onSelectTab = viewModel::selectTab,
+        onDeckClick = onDeckClick,
+        onCreateDeckClick = {
+            viewModel.openCreateDeckDialog()
+            onCreateDeckClick()
+        },
+        onEditDeckClick = viewModel::openEditDeckDialog,
+        onDeleteDeckClick = viewModel::requestDeleteDeck,
+        onImportPrebuiltDeckClick = viewModel::importPrebuiltDeck,
+        onSearchQueryChange = viewModel::onSearchQueryChange,
+        onClearSearch = viewModel::clearSearch,
+        onDialogNameChange = viewModel::onDialogNameChange,
+        onDialogDescriptionChange = viewModel::onDialogDescriptionChange,
+        onSubmitDeckForm = viewModel::submitDeckForm,
+        onDismissDeckFormDialog = viewModel::dismissDeckFormDialog,
+        onConfirmDeleteDeck = viewModel::confirmDeleteDeck,
+        onDismissDeleteDeckDialog = viewModel::dismissDeleteDeckDialog,
         modifier = modifier
     )
 }
