@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import com.uth.memora.core.model.Deck
 import com.uth.memora.feature.common.EmptyState
 import com.uth.memora.feature.common.shimmer.shimmerEffect
+import com.uth.memora.feature.decks.components.DeckFormDialog
 import com.uth.memora.feature.theme.MemoraTheme
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -78,8 +79,26 @@ fun DeckListScreen(
     onImportPrebuiltDeckClick: (String) -> Unit,
     modifier: Modifier = Modifier,
     onSearchQueryChange: (String) -> Unit = {},
-    onClearSearch: () -> Unit = {}
+    onClearSearch: () -> Unit = {},
+    onDialogNameChange: (String) -> Unit = {},
+    onDialogDescriptionChange: (String) -> Unit = {},
+    onSubmitDeckForm: () -> Unit = {},
+    onDismissDeckFormDialog: () -> Unit = {}
 ) {
+    if (uiState.isCreateOrEditDialogVisible) {
+        DeckFormDialog(
+            isEditMode = uiState.editingDeck != null,
+            name = uiState.dialogNameInput,
+            description = uiState.dialogDescriptionInput,
+            nameError = uiState.dialogNameError,
+            descriptionError = uiState.dialogDescriptionError,
+            isSaving = uiState.isSavingDeck,
+            onNameChange = onDialogNameChange,
+            onDescriptionChange = onDialogDescriptionChange,
+            onConfirm = onSubmitDeckForm,
+            onDismiss = onDismissDeckFormDialog
+        )
+    }
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,

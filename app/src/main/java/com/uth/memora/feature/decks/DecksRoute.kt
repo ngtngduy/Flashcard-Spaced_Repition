@@ -41,6 +41,10 @@ fun DecksRoute(
         onImportPrebuiltDeckClick = viewModel::importPrebuiltDeck,
         onSearchQueryChange = viewModel::onSearchQueryChange,
         onClearSearch = viewModel::clearSearch,
+        onDialogNameChange = viewModel::onDialogNameChange,
+        onDialogDescriptionChange = viewModel::onDialogDescriptionChange,
+        onSubmitDeckForm = viewModel::submitDeckForm,
+        onDismissDeckFormDialog = viewModel::dismissDeckFormDialog,
         modifier = modifier
     )
 }
