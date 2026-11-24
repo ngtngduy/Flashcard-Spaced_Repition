@@ -36,6 +36,10 @@ data class DeckDetailUiState(
     val newCardsCount: Int = 0,
     val deletingCard: Card? = null,
     val isDeletingCard: Boolean = false,
+    val resettingCard: Card? = null,
+    val isResettingCard: Boolean = false,
+    val isResetDeckDialogVisible: Boolean = false,
+    val isResettingDeck: Boolean = false,
     val feedbackMessage: String? = null,
     val errorMessage: String? = null
 ) {
@@ -188,6 +192,80 @@ class DeckDetailViewModel(
                             deletingCard = null,
                             isDeletingCard = false,
                             errorMessage = error.message ?: "Không thể xóa thẻ từ vựng."
+                        )
+                    }
+                }
+        }
+    }
+
+    /**
+     * Yêu cầu xác nhận trước khi đặt lại tiến độ SM-2 của một thẻ về Cấp 0 – Chưa học (Mục 6.2 & 7.5).
+     */
+    fun requestResetCardProgress(card: Card) {
+        _uiState.update { it.copy(resettingCard = card) }
+    }
+
+    fun dismissResetCardDialog() {
+        _uiState.update { it.copy(resettingCard = null, isResettingCard = false) }
+    }
+
+    fun confirmResetCardProgress() {
+        val targetCard = _uiState.value.resettingCard ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isResettingCard = true) }
+            cardRepository.resetCardProgress(targetCard.id)
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            resettingCard = null,
+                            isResettingCard = false,
+                            feedbackMessage = "Đã đặt lại tiến độ thẻ \"${targetCard.word}\" về Cấp 0 – Chưa học."
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            resettingCard = null,
+                            isResettingCard = false,
+                            errorMessage = error.message ?: "Không thể đặt lại tiến độ thẻ."
+                        )
+                    }
+                }
+        }
+    }
+
+    /**
+     * Yêu cầu xác nhận trước khi đặt lại toàn bộ tiến độ SM-2 của bộ từ về Cấp 0 – Chưa học (Mục 6.2 & 7.5).
+     */
+    fun requestResetDeckProgress() {
+        _uiState.update { it.copy(isResetDeckDialogVisible = true) }
+    }
+
+    fun dismissResetDeckDialog() {
+        _uiState.update { it.copy(isResetDeckDialogVisible = false, isResettingDeck = false) }
+    }
+
+    fun confirmResetDeckProgress() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isResettingDeck = true) }
+            cardRepository.resetDeckProgress(deckId)
+                .onSuccess {
+                    val deckName = _uiState.value.deck?.name ?: "bộ từ"
+                    _uiState.update {
+                        it.copy(
+                            isResetDeckDialogVisible = false,
+                            isResettingDeck = false,
+                            feedbackMessage = "Đã đặt lại toàn bộ tiến độ của \"$deckName\" về Cấp 0 – Chưa học."
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            isResetDeckDialogVisible = false,
+                            isResettingDeck = false,
+                            errorMessage = error.message ?: "Không thể đặt lại tiến độ bộ từ."
                         )
                     }
                 }

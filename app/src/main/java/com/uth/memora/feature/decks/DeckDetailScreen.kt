@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -66,6 +67,7 @@ import com.uth.memora.core.model.PartOfSpeech
 import com.uth.memora.core.model.RetentionStage
 import com.uth.memora.feature.common.ConfirmDialog
 import com.uth.memora.feature.common.EmptyState
+import com.uth.memora.feature.common.MemoraStatusBadge
 import com.uth.memora.feature.theme.MemoraTheme
 import com.uth.memora.feature.theme.SurfaceLight
 
@@ -91,7 +93,13 @@ fun DeckDetailScreen(
     onSearchQueryChange: (String) -> Unit,
     onClearSearch: () -> Unit,
     onStageFilterSelected: (RetentionStage?) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onRequestResetCardProgress: (Card) -> Unit = {},
+    onConfirmResetCardProgress: () -> Unit = {},
+    onDismissResetCardDialog: () -> Unit = {},
+    onRequestResetDeckProgress: () -> Unit = {},
+    onConfirmResetDeckProgress: () -> Unit = {},
+    onDismissResetDeckDialog: () -> Unit = {}
 ) {
     uiState.deletingCard?.let { cardToDelete ->
         ConfirmDialog(
@@ -105,6 +113,39 @@ fun DeckDetailScreen(
             },
             onDismiss = {
                 if (!uiState.isDeletingCard) onDismissDeleteCardDialog()
+            }
+        )
+    }
+
+    uiState.resettingCard?.let { cardToReset ->
+        ConfirmDialog(
+            title = "Đặt lại tiến độ thẻ?",
+            message = "Toàn bộ tiến độ SM-2 của thẻ \"${cardToReset.word}\" sẽ quay về Cấp 0 – Chưa học. Bạn chắc chắn muốn đặt lại?",
+            confirmText = if (uiState.isResettingCard) "Đang đặt lại..." else "Đặt lại tiến độ",
+            dismissText = "Hủy",
+            isDestructive = false,
+            onConfirm = {
+                if (!uiState.isResettingCard) onConfirmResetCardProgress()
+            },
+            onDismiss = {
+                if (!uiState.isResettingCard) onDismissResetCardDialog()
+            }
+        )
+    }
+
+    if (uiState.isResetDeckDialogVisible) {
+        val deckTitle = uiState.deck?.name ?: "bộ từ này"
+        ConfirmDialog(
+            title = "Đặt lại toàn bộ tiến độ bộ?",
+            message = "Toàn bộ ${uiState.totalCardsCount} thẻ trong bộ \"$deckTitle\" sẽ quay về Cấp 0 – Chưa học. Hành động này sẽ làm mới toàn bộ lịch ôn SM-2 của bộ.",
+            confirmText = if (uiState.isResettingDeck) "Đang đặt lại..." else "Đặt lại toàn bộ",
+            dismissText = "Hủy",
+            isDestructive = true,
+            onConfirm = {
+                if (!uiState.isResettingDeck) onConfirmResetDeckProgress()
+            },
+            onDismiss = {
+                if (!uiState.isResettingDeck) onDismissResetDeckDialog()
             }
         )
     }
@@ -172,6 +213,20 @@ fun DeckDetailScreen(
                             onClick = {
                                 topMenuExpanded = false
                                 onAddCard()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Đặt lại toàn bộ tiến độ bộ") },
+                            enabled = uiState.totalCardsCount > 0,
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.RestartAlt,
+                                    contentDescription = null
+                                )
+                            },
+                            onClick = {
+                                topMenuExpanded = false
+                                onRequestResetDeckProgress()
                             }
                         )
                     }
@@ -351,6 +406,7 @@ fun DeckDetailScreen(
                         DeckVocabularyCardItem(
                             card = card,
                             onEditClick = { onEditCard(card) },
+                            onResetProgressClick = { onRequestResetCardProgress(card) },
                             onDeleteClick = { onRequestDeleteCard(card) }
                         )
                     }
@@ -753,14 +809,16 @@ private fun StageFilterDropdownMenu(
 }
 
 /**
- * Thẻ hiển thị một từ vựng trong màn Chi tiết Bộ từ theo Figma 2101:11 (`2083:117`).
+ * Thẻ hiển thị một từ vựng trong màn Chi tiết Bộ từ kèm huy hiệu cấp độ ghi nhớ [RetentionStage.titleVi]
+ * và các tùy chọn Sửa / Đặt lại tiến độ thẻ / Xóa mềm theo Figma 2101:11 (`2083:117`).
  */
 @Composable
 fun DeckVocabularyCardItem(
     card: Card,
     onEditClick: () -> Unit,
     onDeleteClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onResetProgressClick: () -> Unit = {}
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val posPrefix = card.partOfSpeech?.abbr?.let { "$it.  " }.orEmpty()
@@ -852,6 +910,20 @@ fun DeckVocabularyCardItem(
                             }
                         )
                         DropdownMenuItem(
+                            text = { Text("Đặt lại tiến độ thẻ") },
+                            enabled = card.retentionStage != RetentionStage.LEVEL_0_UNLEARNED,
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.RestartAlt,
+                                    contentDescription = null
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onResetProgressClick()
+                            }
+                        )
+                        DropdownMenuItem(
                             text = {
                                 Text(
                                     text = "Xóa thẻ",
@@ -871,6 +943,23 @@ fun DeckVocabularyCardItem(
                             }
                         )
                     }
+                }
+            }
+
+            // Huy hiệu cấp độ ghi nhớ RetentionStage.titleVi (Figma 2083:121..2083:158 & Mục 7.5)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                MemoraStatusBadge(stage = card.retentionStage)
+
+                if (card.interval > 0) {
+                    Text(
+                        text = "Chu kỳ: ${card.interval} ngày",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }

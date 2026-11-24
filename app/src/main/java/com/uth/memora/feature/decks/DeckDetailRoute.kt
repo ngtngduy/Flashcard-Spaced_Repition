@@ -45,6 +45,12 @@ fun DeckDetailRoute(
         onSearchQueryChange = viewModel::onSearchQueryChange,
         onClearSearch = viewModel::clearSearch,
         onStageFilterSelected = viewModel::onStageFilterSelected,
+        onRequestResetCardProgress = viewModel::requestResetCardProgress,
+        onConfirmResetCardProgress = viewModel::confirmResetCardProgress,
+        onDismissResetCardDialog = viewModel::dismissResetCardDialog,
+        onRequestResetDeckProgress = viewModel::requestResetDeckProgress,
+        onConfirmResetDeckProgress = viewModel::confirmResetDeckProgress,
+        onDismissResetDeckDialog = viewModel::dismissResetDeckDialog,
         modifier = modifier
     )
 }
