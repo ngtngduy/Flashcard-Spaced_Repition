@@ -6,9 +6,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -103,8 +105,8 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 18.dp, vertical = 18.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                        .padding(horizontal = 16.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp)
                 ) {
                     // Hero Section: Lời chào theo buổi + Ngày hiện tại + Nút "+ Thêm flashcard" (Figma 4:31)
                     HomeGreetingHeader(
@@ -333,19 +335,21 @@ fun HomeStatsRow(
 
     Row(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         // Ô 1: Thẻ mới hôm nay (Figma 4:8)
         HomeStatCard(
             title = "Thẻ mới hôm nay",
             icon = Icons.Default.EventAvailable,
             iconTint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.weight(1.25f)
+            modifier = Modifier.weight(1.15f)
         ) {
             Text(
                 text = "$newCardsLearnedToday/$dailyNewCardLimit",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(6.dp))
             MemoraLinearProgressBar(
@@ -363,8 +367,10 @@ fun HomeStatsRow(
         ) {
             Text(
                 text = "$totalDecksCount",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
 
@@ -387,8 +393,10 @@ fun HomeStatsRow(
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
+                Spacer(modifier = Modifier.width(4.dp))
                 Icon(
                     imageVector = shieldIcon,
                     contentDescription = shieldStatusLabel,
@@ -420,23 +428,23 @@ private fun HomeStatCard(
     content: @Composable () -> Unit
 ) {
     Surface(
-        modifier = modifier.heightIn(min = 90.dp),
-        shape = RoundedCornerShape(12.dp),
+        modifier = modifier.heightIn(min = 88.dp),
+        shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(10.dp),
+                .padding(horizontal = 8.dp, vertical = 9.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 Surface(
-                    modifier = Modifier.size(22.dp),
+                    modifier = Modifier.size(20.dp),
                     shape = RoundedCornerShape(4.dp),
                     color = iconTint.copy(alpha = 0.14f)
                 ) {
@@ -445,20 +453,23 @@ private fun HomeStatCard(
                             imageVector = icon,
                             contentDescription = null,
                             tint = iconTint,
-                            modifier = Modifier.size(14.dp)
+                            modifier = Modifier.size(13.dp)
                         )
                     }
                 }
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 10.sp,
+                        lineHeight = 12.sp
+                    ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Column {
                 content()
@@ -485,12 +496,12 @@ fun HomeGreetingHeader(
         Column(
             modifier = Modifier
                 .weight(1f)
-                .padding(end = 12.dp),
+                .padding(end = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
                 text = greetingText,
-                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                 color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -511,17 +522,17 @@ fun HomeGreetingHeader(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary
             ),
-            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.Add,
                 contentDescription = "Thêm flashcard mới",
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(16.dp)
             )
-            Spacer(modifier = Modifier.width(6.dp))
+            Spacer(modifier = Modifier.width(4.dp))
             Text(
                 text = "Thêm flashcard",
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                 maxLines = 1
             )
         }
@@ -542,24 +553,26 @@ fun HomeQuoteBanner(
         color = MaterialTheme.colorScheme.surface
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
                     .width(5.dp)
-                    .height(76.dp)
+                    .fillMaxHeight()
                     .clip(RoundedCornerShape(topStart = 10.dp, bottomStart = 10.dp))
                     .background(MaterialTheme.colorScheme.primary)
             )
             Text(
                 text = quote,
-                style = MaterialTheme.typography.bodyLarge.copy(
+                style = MaterialTheme.typography.bodyMedium.copy(
                     fontWeight = FontWeight.Bold,
                     fontStyle = FontStyle.Italic
                 ),
                 color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp)
             )
         }
     }
@@ -586,7 +599,7 @@ internal fun formatVietnameseDate(date: LocalDate): String {
     return "$dayOfWeekVi, ngày ${date.dayOfMonth} tháng ${date.monthValue}"
 }
 
-@Preview(name = "HomeScreen Stats - Dark", showBackground = true)
+@Preview(name = "HomeScreen 360dp - Dark", widthDp = 360, showBackground = true)
 @Composable
 private fun HomeScreenHeaderDarkPreview() {
     MemoraTheme(darkTheme = true) {
@@ -595,6 +608,8 @@ private fun HomeScreenHeaderDarkPreview() {
                 isLoading = false,
                 newCardsLearnedToday = 7,
                 dailyNewCardLimit = 20,
+                remainingNewCardsToday = 13,
+                dueCardsCount = 24,
                 totalDecksCount = 5,
                 currentStreakDays = 12
             ),
@@ -605,7 +620,7 @@ private fun HomeScreenHeaderDarkPreview() {
     }
 }
 
-@Preview(name = "HomeScreen Stats - Light", showBackground = true)
+@Preview(name = "HomeScreen 360dp - Light", widthDp = 360, showBackground = true)
 @Composable
 private fun HomeScreenHeaderLightPreview() {
     MemoraTheme(darkTheme = false) {
@@ -614,6 +629,8 @@ private fun HomeScreenHeaderLightPreview() {
                 isLoading = false,
                 newCardsLearnedToday = 7,
                 dailyNewCardLimit = 20,
+                remainingNewCardsToday = 13,
+                dueCardsCount = 24,
                 totalDecksCount = 5,
                 currentStreakDays = 12
             ),
