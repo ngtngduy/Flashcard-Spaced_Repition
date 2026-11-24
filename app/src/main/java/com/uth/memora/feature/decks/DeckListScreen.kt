@@ -60,6 +60,7 @@ import com.uth.memora.feature.common.ConfirmDialog
 import com.uth.memora.feature.common.EmptyState
 import com.uth.memora.feature.common.shimmer.shimmerEffect
 import com.uth.memora.feature.decks.components.DeckFormDialog
+import com.uth.memora.feature.decks.components.PrebuiltDeckCard
 import com.uth.memora.feature.theme.MemoraTheme
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -344,13 +345,15 @@ fun DeckListScreen(
                                 items = prebuiltList,
                                 key = { "prebuilt_deck_${it.deck.id}" }
                             ) { item ->
+                                val matchedImportedDeckId = item.importedUserDeckId
+                                    ?: uiState.activeDecks.firstOrNull { it.sourcePrebuiltId == item.deck.id }?.id
                                 val isImporting = item.deck.id in uiState.importingPrebuiltIds
-                                PrebuiltDeckItemCard(
-                                    item = item,
+                                PrebuiltDeckCard(
+                                    item = item.copy(importedUserDeckId = matchedImportedDeckId),
                                     isImporting = isImporting,
                                     onImportClick = { onImportPrebuiltDeckClick(item.deck.id) },
                                     onOpenImportedClick = {
-                                        item.importedUserDeckId?.let(onDeckClick)
+                                        matchedImportedDeckId?.let(onDeckClick)
                                     }
                                 )
                             }
