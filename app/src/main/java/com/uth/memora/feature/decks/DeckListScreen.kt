@@ -24,9 +24,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -36,6 +38,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -73,7 +77,8 @@ fun DeckListScreen(
     onDeleteDeckClick: (Deck) -> Unit,
     onImportPrebuiltDeckClick: (String) -> Unit,
     modifier: Modifier = Modifier,
-    searchBarContent: (@Composable () -> Unit)? = null
+    onSearchQueryChange: (String) -> Unit = {},
+    onClearSearch: () -> Unit = {}
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -166,11 +171,13 @@ fun DeckListScreen(
                     }
                 }
 
-                // Khe cắm thanh tìm kiếm (F3)
-                if (searchBarContent != null) {
-                    item(key = "deck_search_bar") {
-                        searchBarContent()
-                    }
+                // Thanh tìm kiếm không dấu theo tên bộ từ, mô tả và thẻ từ vựng (Figma 2078:14 & Mục 6.9)
+                item(key = "deck_search_bar") {
+                    DeckSearchBar(
+                        query = uiState.searchQuery,
+                        onQueryChange = onSearchQueryChange,
+                        onClearQuery = onClearSearch
+                    )
                 }
 
                 // Hàng Tab lọc: Bộ từ của tôi, Bộ có sẵn, Tất cả (Figma 2078:18)
@@ -214,11 +221,13 @@ fun DeckListScreen(
 
                     val userList = uiState.filteredUserDeckItems
                     val prebuiltList = uiState.filteredPrebuiltDeckItems
+                    val cardMatches = uiState.matchingCards
+                    val hasCardMatches = uiState.searchQuery.isNotBlank() && cardMatches.isNotEmpty()
 
                     val isCurrentViewEmpty = when (uiState.selectedTab) {
-                        DeckFilterTab.USER -> userList.isEmpty()
+                        DeckFilterTab.USER -> userList.isEmpty() && !hasCardMatches
                         DeckFilterTab.PREBUILT -> prebuiltList.isEmpty()
-                        DeckFilterTab.ALL -> userList.isEmpty() && prebuiltList.isEmpty()
+                        DeckFilterTab.ALL -> userList.isEmpty() && prebuiltList.isEmpty() && !hasCardMatches
                     }
 
                     if (isCurrentViewEmpty) {
@@ -226,12 +235,12 @@ fun DeckListScreen(
                             val isSearching = uiState.searchQuery.isNotBlank()
                             EmptyState(
                                 title = if (isSearching) {
-                                    "Không tìm thấy bộ từ phù hợp"
+                                    "Không tìm thấy bộ từ hoặc từ vựng phù hợp"
                                 } else {
                                     "Chưa có bộ từ vựng nào"
                                 },
                                 description = if (isSearching) {
-                                    "Thử tìm kiếm với từ khóa khác hoặc tạo bộ từ mới."
+                                    "Không có kết quả cho \"${uiState.searchQuery}\". Hãy thử từ khóa khác (hỗ trợ tìm tiếng Việt không dấu)."
                                 } else {
                                     "Hãy tạo bộ từ đầu tiên hoặc sao chép từ kho Bộ có sẵn để bắt đầu học."
                                 },
@@ -283,9 +292,157 @@ fun DeckListScreen(
                                 )
                             }
                         }
+
+                        if (showUserSection && hasCardMatches) {
+                            item(key = "section_header_matched_cards") {
+                                DeckSectionHeader(
+                                    title = "Thẻ từ vựng khớp từ khóa",
+                                    countText = "${cardMatches.size} thẻ"
+                                )
+                            }
+                            items(
+                                items = cardMatches,
+                                key = { "matched_card_${it.card.id}" }
+                            ) { match ->
+                                DeckSearchCardMatchItem(
+                                    match = match,
+                                    onClick = { onDeckClick(match.card.deckId) }
+                                )
+                            }
+                        }
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Thanh tìm kiếm không phân biệt hoa/thường và dấu tiếng Việt trên màn Quản lý Bộ từ (Figma 2078:14 & Mục 6.9).
+ */
+@Composable
+fun DeckSearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onClearQuery: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        modifier = modifier.fillMaxWidth(),
+        singleLine = true,
+        shape = RoundedCornerShape(10.dp),
+        placeholder = {
+            Text(
+                text = "Tìm bộ từ hoặc từ vựng...",
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        },
+        leadingIcon = {
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = "Tìm kiếm bộ từ",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                IconButton(onClick = onClearQuery) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Xóa từ khóa tìm kiếm",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        },
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = MaterialTheme.colorScheme.surface,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+            focusedBorderColor = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+        )
+    )
+}
+
+/**
+ * Thẻ hiển thị kết quả từ vựng khớp với từ khóa tìm kiếm trên màn Quản lý Bộ từ.
+ */
+@Composable
+fun DeckSearchCardMatchItem(
+    match: DeckSearchCardMatch,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = match.card.word,
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (match.card.phonetic.isNotBlank()) {
+                        Text(
+                            text = match.card.phonetic,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Text(
+                        text = match.deckName,
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            Text(
+                text = match.card.meaning,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

@@ -39,6 +39,8 @@ fun DecksRoute(
         onEditDeckClick = viewModel::openEditDeckDialog,
         onDeleteDeckClick = viewModel::requestDeleteDeck,
         onImportPrebuiltDeckClick = viewModel::importPrebuiltDeck,
+        onSearchQueryChange = viewModel::onSearchQueryChange,
+        onClearSearch = viewModel::clearSearch,
         modifier = modifier
     )
 }
