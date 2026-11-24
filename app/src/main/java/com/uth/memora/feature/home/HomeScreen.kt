@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -23,6 +24,8 @@ import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.EventAvailable
 import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -42,10 +45,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.uth.memora.core.model.StudyMode
 import com.uth.memora.feature.common.MemoraLinearProgressBar
 import com.uth.memora.feature.theme.MemoraTheme
 import com.uth.memora.feature.theme.StatusWarning
+import com.uth.memora.feature.theme.SurfaceLight
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalTime
@@ -98,13 +103,15 @@ fun HomeScreen(
                     onAddCardClick = onNavigateToAddCard
                 )
 
-                // Hàng 3 thẻ thống kê nhanh: Thẻ mới hôm nay, Bộ từ vựng, Chuỗi ngày học (Figma 4:8, 4:36, 4:47)
+                // Hàng 3 thẻ thống kê nhanh: Thẻ mới hôm nay, Bộ từ vựng, Chuỗi ngày học + Khiên (Figma 4:8, 4:36, 4:47, 2235:61, 2235:66)
                 HomeStatsRow(
                     newCardsLearnedToday = uiState.newCardsLearnedToday,
                     dailyNewCardLimit = uiState.dailyNewCardLimit,
                     newCardsProgress = uiState.newCardsProgressFraction,
                     totalDecksCount = uiState.totalDecksCount,
-                    currentStreakDays = uiState.currentStreakDays
+                    currentStreakDays = uiState.currentStreakDays,
+                    streakFreezeAvailable = uiState.streakFreezeAvailable,
+                    isStreakProtectedToday = uiState.isStreakProtectedToday
                 )
 
                 // Khung châm ngôn học tập (Figma 4:74)
@@ -120,7 +127,7 @@ fun HomeScreen(
  * Hàng 3 ô thống kê nhanh trên Trang chính theo Figma Node 1:2 (4:8, 4:36, 4:47):
  * - Thẻ mới hôm nay (x/20 + thanh tiến độ nhỏ 4.dp)
  * - Bộ từ vựng (tổng số bộ từ đang hoạt động)
- * - Chuỗi ngày học (Streak)
+ * - Chuỗi ngày học (Streak + Khiên bảo vệ chuỗi 2235:61 & 2235:66)
  */
 @Composable
 fun HomeStatsRow(
@@ -129,8 +136,29 @@ fun HomeStatsRow(
     newCardsProgress: Float,
     totalDecksCount: Int,
     currentStreakDays: Int,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    streakFreezeAvailable: Boolean = true,
+    isStreakProtectedToday: Boolean = false
 ) {
+    val isLight = MaterialTheme.colorScheme.surface == SurfaceLight
+    val shieldActiveColor = if (isLight) Color(0xFF0369A1) else Color(0xFF0284C7)
+    val isShieldActive = streakFreezeAvailable || isStreakProtectedToday
+    val shieldTint = if (isShieldActive) {
+        shieldActiveColor
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val shieldIcon = if (isShieldActive) {
+        Icons.Default.VerifiedUser
+    } else {
+        Icons.Default.Shield
+    }
+    val shieldStatusLabel = when {
+        isStreakProtectedToday -> "Khiên: Đang bảo vệ"
+        streakFreezeAvailable -> "Khiên: Sẵn sàng"
+        else -> "Khiên: Đã dùng"
+    }
+
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -159,7 +187,7 @@ fun HomeStatsRow(
             title = "Bộ từ vựng",
             icon = Icons.AutoMirrored.Filled.MenuBook,
             iconTint = MaterialTheme.colorScheme.secondary,
-            modifier = Modifier.weight(0.9f)
+            modifier = Modifier.weight(0.85f)
         ) {
             Text(
                 text = "$totalDecksCount",
@@ -168,17 +196,42 @@ fun HomeStatsRow(
             )
         }
 
-        // Ô 3: Chuỗi ngày học Streak (Figma 4:47)
+        // Ô 3: Chuỗi ngày học Streak + Icon Khiên bảo vệ (Figma 4:47, 2235:61, 2235:66)
         HomeStatCard(
             title = "Chuỗi ngày học",
             icon = Icons.Default.LocalFireDepartment,
             iconTint = StatusWarning,
-            modifier = Modifier.weight(1.1f)
+            modifier = Modifier
+                .weight(1.15f)
+                .widthIn(min = 100.dp)
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "$currentStreakDays ngày",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Icon(
+                    imageVector = shieldIcon,
+                    contentDescription = shieldStatusLabel,
+                    tint = shieldTint,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "$currentStreakDays ngày",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface,
+                text = shieldStatusLabel,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium
+                ),
+                color = shieldTint,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
