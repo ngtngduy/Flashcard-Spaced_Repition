@@ -2,6 +2,7 @@ package com.uth.memora.feature.home
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.EventAvailable
@@ -28,11 +30,13 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -56,8 +60,9 @@ import java.time.LocalDate
 import java.time.LocalTime
 
 /**
- * Màn hình Trang chính (Home Dashboard - Figma Node 1:2 & Mục 6.5, 6.6).
+ * Màn hình Trang chính (Home Dashboard - Figma Node 1:2 & Mục 6.5, 6.6, 10.1).
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     uiState: HomeUiState,
@@ -89,35 +94,202 @@ fun HomeScreen(
                 )
             }
 
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp, vertical = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp)
+            PullToRefreshBox(
+                isRefreshing = uiState.isRefreshing,
+                onRefresh = onRefreshSync,
+                modifier = Modifier.fillMaxSize()
             ) {
-                // Hero Section: Lời chào theo buổi + Ngày hiện tại + Nút "+ Thêm flashcard" (Figma 4:31)
-                HomeGreetingHeader(
-                    greetingText = greetingText,
-                    dateText = dateText,
-                    onAddCardClick = onNavigateToAddCard
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 18.dp, vertical = 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
+                    // Hero Section: Lời chào theo buổi + Ngày hiện tại + Nút "+ Thêm flashcard" (Figma 4:31)
+                    HomeGreetingHeader(
+                        greetingText = greetingText,
+                        dateText = dateText,
+                        onAddCardClick = onNavigateToAddCard
+                    )
 
-                // Hàng 3 thẻ thống kê nhanh: Thẻ mới hôm nay, Bộ từ vựng, Chuỗi ngày học + Khiên (Figma 4:8, 4:36, 4:47, 2235:61, 2235:66)
-                HomeStatsRow(
-                    newCardsLearnedToday = uiState.newCardsLearnedToday,
-                    dailyNewCardLimit = uiState.dailyNewCardLimit,
-                    newCardsProgress = uiState.newCardsProgressFraction,
-                    totalDecksCount = uiState.totalDecksCount,
-                    currentStreakDays = uiState.currentStreakDays,
-                    streakFreezeAvailable = uiState.streakFreezeAvailable,
-                    isStreakProtectedToday = uiState.isStreakProtectedToday
-                )
+                    // Thông báo đồng bộ / lỗi nếu có
+                    uiState.syncMessage?.let { msg ->
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Text(
+                                text = msg,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
 
-                // Khung châm ngôn học tập (Figma 4:74)
-                HomeQuoteBanner(
-                    quote = "“Điều tuyệt vời của việc học là không ai có thể lấy nó khỏi bạn.”"
+                    // Hàng 3 thẻ thống kê nhanh: Thẻ mới hôm nay, Bộ từ vựng, Chuỗi ngày học + Khiên (Figma 4:8, 4:36, 4:47, 2235:61, 2235:66)
+                    HomeStatsRow(
+                        newCardsLearnedToday = uiState.newCardsLearnedToday,
+                        dailyNewCardLimit = uiState.dailyNewCardLimit,
+                        newCardsProgress = uiState.newCardsProgressFraction,
+                        totalDecksCount = uiState.totalDecksCount,
+                        currentStreakDays = uiState.currentStreakDays,
+                        streakFreezeAvailable = uiState.streakFreezeAvailable,
+                        isStreakProtectedToday = uiState.isStreakProtectedToday
+                    )
+
+                    // Khung châm ngôn học tập (Figma 4:74)
+                    HomeQuoteBanner(
+                        quote = "“Điều tuyệt vời của việc học là không ai có thể lấy nó khỏi bạn.”"
+                    )
+
+                    // Thẻ CTA 1: Học từ mới theo hạn mức (Figma 2011:6)
+                    HomeStudyCtaCard(
+                        title = "Học từ mới (Còn ${uiState.remainingNewCardsToday} thẻ theo hạn mức)",
+                        count = uiState.remainingNewCardsToday,
+                        borderColor = MaterialTheme.colorScheme.primary,
+                        onClick = { onNavigateToStudy("all", StudyMode.NEW_CARDS) }
+                    )
+
+                    // Thẻ CTA 2: Ôn tập hôm nay các thẻ đến hạn (Figma 2015:4)
+                    HomeStudyCtaCard(
+                        title = "Ôn tập hôm nay (${uiState.dueCardsCount} thẻ đến hạn)",
+                        count = uiState.dueCardsCount,
+                        borderColor = Color(0xFFFF4B0F),
+                        onClick = { onNavigateToStudy("all", StudyMode.DUE_REVIEW) }
+                    )
+
+                    // Danh sách bộ từ nổi bật đang hoạt động để bấm vào chi tiết bộ từ
+                    if (uiState.deckItems.isNotEmpty()) {
+                        HomeFeaturedDecksSection(
+                            deckItems = uiState.deckItems,
+                            onDeckClick = onNavigateToDeckDetail
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Thẻ CTA lớn trên Trang chính cho "Học từ mới" (Figma 2011:6 - viền xanh #417DFF 3.dp)
+ * và "Ôn tập hôm nay" (Figma 2015:4 - viền cam #FF4B0F 3.dp).
+ */
+@Composable
+fun HomeStudyCtaCard(
+    title: String,
+    count: Int,
+    borderColor: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 172.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(3.dp, borderColor)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 96.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "$count",
+                    style = MaterialTheme.typography.displayLarge.copy(
+                        fontSize = 64.sp,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Danh sách bộ từ đang hoạt động trên Trang chính giúp truy cập nhanh màn Chi tiết bộ từ.
+ */
+@Composable
+fun HomeFeaturedDecksSection(
+    deckItems: List<HomeDeckItem>,
+    onDeckClick: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = "Bộ từ của bạn",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onBackground
+        )
+
+        deckItems.forEach { item ->
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onDeckClick(item.deck.id) },
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = item.deck.name,
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "${item.totalCardsCount} thẻ · ${item.dueCardsCount} đến hạn · ${item.newCardsCount} mới",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Xem chi tiết bộ từ ${item.deck.name}",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }
