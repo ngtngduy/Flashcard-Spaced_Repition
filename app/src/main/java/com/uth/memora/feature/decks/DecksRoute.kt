@@ -45,6 +45,8 @@ fun DecksRoute(
         onDialogDescriptionChange = viewModel::onDialogDescriptionChange,
         onSubmitDeckForm = viewModel::submitDeckForm,
         onDismissDeckFormDialog = viewModel::dismissDeckFormDialog,
+        onConfirmDeleteDeck = viewModel::confirmDeleteDeck,
+        onDismissDeleteDeckDialog = viewModel::dismissDeleteDeckDialog,
         modifier = modifier
     )
 }

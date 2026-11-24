@@ -56,6 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.uth.memora.core.model.Deck
+import com.uth.memora.feature.common.ConfirmDialog
 import com.uth.memora.feature.common.EmptyState
 import com.uth.memora.feature.common.shimmer.shimmerEffect
 import com.uth.memora.feature.decks.components.DeckFormDialog
@@ -83,7 +84,9 @@ fun DeckListScreen(
     onDialogNameChange: (String) -> Unit = {},
     onDialogDescriptionChange: (String) -> Unit = {},
     onSubmitDeckForm: () -> Unit = {},
-    onDismissDeckFormDialog: () -> Unit = {}
+    onDismissDeckFormDialog: () -> Unit = {},
+    onConfirmDeleteDeck: () -> Unit = {},
+    onDismissDeleteDeckDialog: () -> Unit = {}
 ) {
     if (uiState.isCreateOrEditDialogVisible) {
         DeckFormDialog(
@@ -97,6 +100,30 @@ fun DeckListScreen(
             onDescriptionChange = onDialogDescriptionChange,
             onConfirm = onSubmitDeckForm,
             onDismiss = onDismissDeckFormDialog
+        )
+    }
+
+    uiState.deletingDeck?.let { deckToDelete ->
+        val deckCardCount = uiState.userDeckItems
+            .firstOrNull { it.deck.id == deckToDelete.id }
+            ?.totalCardsCount ?: 0
+
+        ConfirmDialog(
+            title = "Xóa bộ từ vựng?",
+            message = "Xóa bộ \"${deckToDelete.name}\" sẽ xóa mềm toàn bộ $deckCardCount thẻ từ vựng bên trong. Bạn chắc chắn muốn xóa chứ?",
+            confirmText = if (uiState.isDeletingDeck) "Đang xóa..." else "Xóa bộ từ",
+            dismissText = "Hủy",
+            isDestructive = true,
+            onConfirm = {
+                if (!uiState.isDeletingDeck) {
+                    onConfirmDeleteDeck()
+                }
+            },
+            onDismiss = {
+                if (!uiState.isDeletingDeck) {
+                    onDismissDeleteDeckDialog()
+                }
+            }
         )
     }
     Scaffold(
@@ -222,6 +249,23 @@ fun DeckListScreen(
                                 text = msg,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                            )
+                        }
+                    }
+                }
+
+                uiState.errorMessage?.let { err ->
+                    item(key = "deck_error_banner") {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.errorContainer
+                        ) {
+                            Text(
+                                text = err,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                             )
                         }
