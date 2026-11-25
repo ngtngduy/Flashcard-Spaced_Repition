@@ -9,11 +9,15 @@ import com.uth.memora.core.database.mapper.toEntity
 import com.uth.memora.core.domain.AuthRepository
 import com.uth.memora.core.domain.StudySessionRepository
 import com.uth.memora.core.domain.UserPreferencesRepository
+import com.uth.memora.core.domain.logic.StreakCalculator
 import com.uth.memora.core.model.Card
 import com.uth.memora.core.model.Deck
+import com.uth.memora.core.model.ReviewLog
 import com.uth.memora.core.model.ReviewQuality
+import com.uth.memora.core.model.SyncStatus
 import com.uth.memora.core.sm2.LearningDayCalculator
 import com.uth.memora.core.sm2.Sm2Engine
+import java.util.UUID
 
 /**
  * Hiện thực [StudySessionRepository] trên Room Database (Mục 6.5, 6.6, 7.1–7.6, 9.1 & 10.2).
@@ -113,6 +117,10 @@ class RoomStudySessionRepository(
         val cleanCardId = cardId.trim()
         val nowMillis = timeProvider()
         val todayLearningDay = learningDayProvider()
+        val clampedDurationSeconds = durationValidSeconds.coerceIn(
+            1,
+            ReviewLog.MAX_SECONDS_PER_REVIEW
+        )
 
         var updatedCard: Card? = null
         transactionRunner {
@@ -128,8 +136,40 @@ class RoomStudySessionRepository(
             )
 
             cardDao.upsertCard(computation.updatedCard.toEntity())
+
+            val reviewLog = ReviewLog(
+                id = UUID.randomUUID().toString(),
+                cardId = currentCard.id,
+                deckId = currentCard.deckId,
+                ownerId = currentCard.ownerId,
+                quality = quality,
+                learningDay = todayLearningDay,
+                reviewedAtMillis = nowMillis,
+                durationValidSeconds = clampedDurationSeconds,
+                snapshotBeforeReview = computation.snapshotBeforeReview,
+                isUndone = false,
+                updatedAtMillis = nowMillis,
+                syncStatus = SyncStatus.PENDING_SYNC
+            )
+            reviewLogDao.insertLog(reviewLog.toEntity())
+
             updatedCard = computation.updatedCard
         }
+
+        val currentPrefs = preferencesRepository.getUserPreferences()
+        val streakResult = StreakCalculator.calculateNextStreak(
+            currentStreak = currentPrefs.currentStreak,
+            lastStudyDay = currentPrefs.lastStudyLearningDay,
+            todayLearningDay = todayLearningDay,
+            isFreezeAvailable = currentPrefs.hasStreakFreezeAvailable,
+            lastFreezeUsedDay = currentPrefs.lastStreakFreezeUsedDay
+        )
+        preferencesRepository.updateStreak(
+            streak = streakResult.newStreak,
+            isFrozen = streakResult.isFreezeUsed,
+            lastStudyLearningDay = streakResult.lastStudyLearningDay,
+            lastFreezeUsedDay = streakResult.lastFreezeUsedDay
+        )
 
         updatedCard ?: throw IllegalStateException("Không thể cập nhật tiến độ thẻ.")
     }
