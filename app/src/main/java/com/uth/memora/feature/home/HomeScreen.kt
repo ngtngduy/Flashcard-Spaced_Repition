@@ -38,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -53,7 +54,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.uth.memora.core.model.StudyMode
+import com.uth.memora.feature.common.EmptyState
 import com.uth.memora.feature.common.MemoraLinearProgressBar
+import com.uth.memora.feature.common.shimmer.shimmerEffect
 import com.uth.memora.feature.theme.MemoraTheme
 import com.uth.memora.feature.theme.StatusWarning
 import com.uth.memora.feature.theme.SurfaceLight
@@ -72,7 +75,8 @@ fun HomeScreen(
     onNavigateToDeckDetail: (String) -> Unit,
     onNavigateToAddCard: () -> Unit,
     modifier: Modifier = Modifier,
-    onRefreshSync: () -> Unit = {}
+    onRefreshSync: () -> Unit = {},
+    onRetryLoad: () -> Unit = {}
 ) {
     val greetingText = remember { buildVietnameseGreeting() }
     val dateText = remember { formatVietnameseDate(LocalDate.now()) }
@@ -131,44 +135,86 @@ fun HomeScreen(
                         }
                     }
 
-                    // Hàng 3 thẻ thống kê nhanh: Thẻ mới hôm nay, Bộ từ vựng, Chuỗi ngày học + Khiên (Figma 4:8, 4:36, 4:47, 2235:61, 2235:66)
-                    HomeStatsRow(
-                        newCardsLearnedToday = uiState.newCardsLearnedToday,
-                        dailyNewCardLimit = uiState.dailyNewCardLimit,
-                        newCardsProgress = uiState.newCardsProgressFraction,
-                        totalDecksCount = uiState.totalDecksCount,
-                        currentStreakDays = uiState.currentStreakDays,
-                        streakFreezeAvailable = uiState.streakFreezeAvailable,
-                        isStreakProtectedToday = uiState.isStreakProtectedToday
-                    )
+                    uiState.errorMessage?.let { err ->
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.errorContainer
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = err,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = onRetryLoad) {
+                                    Text(
+                                        text = "Thử lại",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                            }
+                        }
+                    }
 
-                    // Khung châm ngôn học tập (Figma 4:74)
-                    HomeQuoteBanner(
-                        quote = "“Điều tuyệt vời của việc học là không ai có thể lấy nó khỏi bạn.”"
-                    )
-
-                    // Thẻ CTA 1: Học từ mới theo hạn mức (Figma 2011:6)
-                    HomeStudyCtaCard(
-                        title = "Học từ mới (Còn ${uiState.remainingNewCardsToday} thẻ theo hạn mức)",
-                        count = uiState.remainingNewCardsToday,
-                        borderColor = MaterialTheme.colorScheme.primary,
-                        onClick = { onNavigateToStudy("all", StudyMode.NEW_CARDS) }
-                    )
-
-                    // Thẻ CTA 2: Ôn tập hôm nay các thẻ đến hạn (Figma 2015:4)
-                    HomeStudyCtaCard(
-                        title = "Ôn tập hôm nay (${uiState.dueCardsCount} thẻ đến hạn)",
-                        count = uiState.dueCardsCount,
-                        borderColor = Color(0xFFFF4B0F),
-                        onClick = { onNavigateToStudy("all", StudyMode.DUE_REVIEW) }
-                    )
-
-                    // Danh sách bộ từ nổi bật đang hoạt động để bấm vào chi tiết bộ từ
-                    if (uiState.deckItems.isNotEmpty()) {
-                        HomeFeaturedDecksSection(
-                            deckItems = uiState.deckItems,
-                            onDeckClick = onNavigateToDeckDetail
+                    if (uiState.isLoading) {
+                        HomeDashboardShimmerSkeleton()
+                    } else {
+                        // Hàng 3 thẻ thống kê nhanh: Thẻ mới hôm nay, Bộ từ vựng, Chuỗi ngày học + Khiên (Figma 4:8, 4:36, 4:47, 2235:61, 2235:66)
+                        HomeStatsRow(
+                            newCardsLearnedToday = uiState.newCardsLearnedToday,
+                            dailyNewCardLimit = uiState.dailyNewCardLimit,
+                            newCardsProgress = uiState.newCardsProgressFraction,
+                            totalDecksCount = uiState.totalDecksCount,
+                            currentStreakDays = uiState.currentStreakDays,
+                            streakFreezeAvailable = uiState.streakFreezeAvailable,
+                            isStreakProtectedToday = uiState.isStreakProtectedToday
                         )
+
+                        // Khung châm ngôn học tập (Figma 4:74)
+                        HomeQuoteBanner(
+                            quote = "“Điều tuyệt vời của việc học là không ai có thể lấy nó khỏi bạn.”"
+                        )
+
+                        // Thẻ CTA 1: Học từ mới theo hạn mức (Figma 2011:6)
+                        HomeStudyCtaCard(
+                            title = "Học từ mới (Còn ${uiState.remainingNewCardsToday} thẻ theo hạn mức)",
+                            count = uiState.remainingNewCardsToday,
+                            borderColor = MaterialTheme.colorScheme.primary,
+                            onClick = { onNavigateToStudy("all", StudyMode.NEW_CARDS) }
+                        )
+
+                        // Thẻ CTA 2: Ôn tập hôm nay các thẻ đến hạn (Figma 2015:4)
+                        HomeStudyCtaCard(
+                            title = "Ôn tập hôm nay (${uiState.dueCardsCount} thẻ đến hạn)",
+                            count = uiState.dueCardsCount,
+                            borderColor = Color(0xFFFF4B0F),
+                            onClick = { onNavigateToStudy("all", StudyMode.DUE_REVIEW) }
+                        )
+
+                        // Danh sách bộ từ nổi bật đang hoạt động hoặc EmptyState khi chưa có bộ từ
+                        if (uiState.deckItems.isNotEmpty()) {
+                            HomeFeaturedDecksSection(
+                                deckItems = uiState.deckItems,
+                                onDeckClick = onNavigateToDeckDetail
+                            )
+                        } else {
+                            EmptyState(
+                                title = "Chưa có bộ từ vựng nào",
+                                description = "Hãy thêm flashcard hoặc tạo bộ từ đầu tiên để bắt đầu lộ trình ôn tập SM-2.",
+                                icon = Icons.AutoMirrored.Filled.MenuBook,
+                                actionText = "+ Thêm flashcard ngay",
+                                onActionClick = onNavigateToAddCard
+                            )
+                        }
                     }
                 }
             }
@@ -573,6 +619,50 @@ fun HomeQuoteBanner(
                 ),
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Khung Shimmer Skeleton cho Trang chính khi đang tải dữ liệu lần đầu (Mục 11).
+ */
+@Composable
+fun HomeDashboardShimmerSkeleton(
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            repeat(3) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(88.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .shimmerEffect()
+                )
+            }
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(76.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .shimmerEffect()
+        )
+        repeat(2) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(172.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .shimmerEffect()
             )
         }
     }

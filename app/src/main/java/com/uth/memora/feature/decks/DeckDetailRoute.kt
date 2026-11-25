@@ -51,6 +51,7 @@ fun DeckDetailRoute(
         onRequestResetDeckProgress = viewModel::requestResetDeckProgress,
         onConfirmResetDeckProgress = viewModel::confirmResetDeckProgress,
         onDismissResetDeckDialog = viewModel::dismissResetDeckDialog,
+        onRetryLoad = viewModel::loadDeckAndObserveCards,
         modifier = modifier
     )
 }

@@ -47,6 +47,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -99,7 +100,8 @@ fun DeckDetailScreen(
     onDismissResetCardDialog: () -> Unit = {},
     onRequestResetDeckProgress: () -> Unit = {},
     onConfirmResetDeckProgress: () -> Unit = {},
-    onDismissResetDeckDialog: () -> Unit = {}
+    onDismissResetDeckDialog: () -> Unit = {},
+    onRetryLoad: () -> Unit = {}
 ) {
     uiState.deletingCard?.let { cardToDelete ->
         ConfirmDialog(
@@ -282,12 +284,27 @@ fun DeckDetailScreen(
                             shape = RoundedCornerShape(10.dp),
                             color = MaterialTheme.colorScheme.errorContainer
                         ) {
-                            Text(
-                                text = err,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = err,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = onRetryLoad) {
+                                    Text(
+                                        text = "Thử lại",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -379,7 +396,11 @@ fun DeckDetailScreen(
                     )
                 }
 
-                if (!uiState.isLoading && uiState.filteredCards.isEmpty()) {
+                if (uiState.isLoading) {
+                    items(count = 3, key = { "deck_detail_shimmer_$it" }) {
+                        DeckCardShimmerSkeleton()
+                    }
+                } else if (uiState.filteredCards.isEmpty()) {
                     item(key = "deck_cards_empty") {
                         val isFiltering = uiState.searchQuery.isNotBlank() || uiState.selectedStageFilter != null
                         EmptyState(
