@@ -17,6 +17,8 @@ import com.uth.memora.core.model.ReviewQuality
 import com.uth.memora.core.model.SyncStatus
 import com.uth.memora.core.sm2.LearningDayCalculator
 import com.uth.memora.core.sm2.Sm2Engine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.UUID
 
 /**
@@ -44,6 +46,11 @@ class RoomStudySessionRepository(
         }
     }
 ) : StudySessionRepository {
+
+    private val reviewMutex = Mutex()
+    private var lastSubmittedCardId: String? = null
+    private var lastSubmittedAtMillis: Long = -1L
+    private var lastSubmittedCardResult: Card? = null
 
     override suspend fun getNewCardsQueue(deckId: String?): List<Card> {
         val ownerId = ownerIdProvider()
@@ -113,95 +120,118 @@ class RoomStudySessionRepository(
         cardId: String,
         quality: ReviewQuality,
         durationValidSeconds: Int
-    ): Result<Card> = runCatching {
-        val cleanCardId = cardId.trim()
-        val nowMillis = timeProvider()
-        val todayLearningDay = learningDayProvider()
-        val clampedDurationSeconds = durationValidSeconds.coerceIn(
-            1,
-            ReviewLog.MAX_SECONDS_PER_REVIEW
-        )
+    ): Result<Card> = reviewMutex.withLock {
+        runCatching {
+            val cleanCardId = cardId.trim()
+            val nowMillis = timeProvider()
+            val todayLearningDay = learningDayProvider()
 
-        var updatedCard: Card? = null
-        transactionRunner {
-            val existingEntity = cardDao.getCardById(cleanCardId)
-                ?: throw NoSuchElementException("Không tìm thấy thẻ.")
-            val currentCard = existingEntity.toDomain()
+            // Chống bấm đúp 2 lần liên tiếp trên cùng 1 thẻ trong < 800ms (M1-F7)
+            val cachedResult = lastSubmittedCardResult
+            if (cleanCardId == lastSubmittedCardId &&
+                cachedResult != null &&
+                lastSubmittedAtMillis >= 0L &&
+                (nowMillis - lastSubmittedAtMillis) in 0 until DUPLICATE_SUBMISSION_WINDOW_MILLIS
+            ) {
+                return@runCatching cachedResult
+            }
 
-            val computation = Sm2Engine.evaluateReview(
-                card = currentCard,
-                quality = quality,
-                currentLearningDay = todayLearningDay,
-                nowMillis = nowMillis
+            val clampedDurationSeconds = durationValidSeconds.coerceIn(
+                1,
+                ReviewLog.MAX_SECONDS_PER_REVIEW
             )
 
-            cardDao.upsertCard(computation.updatedCard.toEntity())
+            var updatedCard: Card? = null
+            transactionRunner {
+                val existingEntity = cardDao.getCardById(cleanCardId)
+                    ?: throw NoSuchElementException("Không tìm thấy thẻ.")
+                val currentCard = existingEntity.toDomain()
 
-            val reviewLog = ReviewLog(
-                id = UUID.randomUUID().toString(),
-                cardId = currentCard.id,
-                deckId = currentCard.deckId,
-                ownerId = currentCard.ownerId,
-                quality = quality,
-                learningDay = todayLearningDay,
-                reviewedAtMillis = nowMillis,
-                durationValidSeconds = clampedDurationSeconds,
-                snapshotBeforeReview = computation.snapshotBeforeReview,
-                isUndone = false,
-                updatedAtMillis = nowMillis,
-                syncStatus = SyncStatus.PENDING_SYNC
+                val computation = Sm2Engine.evaluateReview(
+                    card = currentCard,
+                    quality = quality,
+                    currentLearningDay = todayLearningDay,
+                    nowMillis = nowMillis
+                )
+
+                cardDao.upsertCard(computation.updatedCard.toEntity())
+
+                val reviewLog = ReviewLog(
+                    id = UUID.randomUUID().toString(),
+                    cardId = currentCard.id,
+                    deckId = currentCard.deckId,
+                    ownerId = currentCard.ownerId,
+                    quality = quality,
+                    learningDay = todayLearningDay,
+                    reviewedAtMillis = nowMillis,
+                    durationValidSeconds = clampedDurationSeconds,
+                    snapshotBeforeReview = computation.snapshotBeforeReview,
+                    isUndone = false,
+                    updatedAtMillis = nowMillis,
+                    syncStatus = SyncStatus.PENDING_SYNC
+                )
+                reviewLogDao.insertLog(reviewLog.toEntity())
+
+                updatedCard = computation.updatedCard
+            }
+
+            val currentPrefs = preferencesRepository.getUserPreferences()
+            val streakResult = StreakCalculator.calculateNextStreak(
+                currentStreak = currentPrefs.currentStreak,
+                lastStudyDay = currentPrefs.lastStudyLearningDay,
+                todayLearningDay = todayLearningDay,
+                isFreezeAvailable = currentPrefs.hasStreakFreezeAvailable,
+                lastFreezeUsedDay = currentPrefs.lastStreakFreezeUsedDay
             )
-            reviewLogDao.insertLog(reviewLog.toEntity())
+            preferencesRepository.updateStreak(
+                streak = streakResult.newStreak,
+                isFrozen = streakResult.isFreezeUsed,
+                lastStudyLearningDay = streakResult.lastStudyLearningDay,
+                lastFreezeUsedDay = streakResult.lastFreezeUsedDay
+            )
 
-            updatedCard = computation.updatedCard
+            val savedCard = updatedCard ?: throw IllegalStateException("Không thể cập nhật tiến độ thẻ.")
+            lastSubmittedCardId = cleanCardId
+            lastSubmittedAtMillis = nowMillis
+            lastSubmittedCardResult = savedCard
+            savedCard
         }
-
-        val currentPrefs = preferencesRepository.getUserPreferences()
-        val streakResult = StreakCalculator.calculateNextStreak(
-            currentStreak = currentPrefs.currentStreak,
-            lastStudyDay = currentPrefs.lastStudyLearningDay,
-            todayLearningDay = todayLearningDay,
-            isFreezeAvailable = currentPrefs.hasStreakFreezeAvailable,
-            lastFreezeUsedDay = currentPrefs.lastStreakFreezeUsedDay
-        )
-        preferencesRepository.updateStreak(
-            streak = streakResult.newStreak,
-            isFrozen = streakResult.isFreezeUsed,
-            lastStudyLearningDay = streakResult.lastStudyLearningDay,
-            lastFreezeUsedDay = streakResult.lastFreezeUsedDay
-        )
-
-        updatedCard ?: throw IllegalStateException("Không thể cập nhật tiến độ thẻ.")
     }
 
-    override suspend fun undoLastReview(): Result<Card> = runCatching {
-        val ownerId = ownerIdProvider()
-        val nowMillis = timeProvider()
-        var restoredCard: Card? = null
+    override suspend fun undoLastReview(): Result<Card> = reviewMutex.withLock {
+        runCatching {
+            val ownerId = ownerIdProvider()
+            val nowMillis = timeProvider()
+            var restoredCard: Card? = null
 
-        transactionRunner {
-            val latestLog = reviewLogDao.getLatestActiveLog(ownerId)
-                ?: throw IllegalStateException("Không có lượt đánh giá nào để hoàn tác.")
+            transactionRunner {
+                val latestLog = reviewLogDao.getLatestActiveLog(ownerId)
+                    ?: throw IllegalStateException("Không có lượt đánh giá nào để hoàn tác.")
 
-            val cardEntity = cardDao.getCardById(latestLog.cardId)
-                ?: throw NoSuchElementException("Không tìm thấy thẻ cần hoàn tác.")
+                val cardEntity = cardDao.getCardById(latestLog.cardId)
+                    ?: throw NoSuchElementException("Không tìm thấy thẻ cần hoàn tác.")
 
-            val restored = Sm2Engine.restoreFromSnapshot(
-                card = cardEntity.toDomain(),
-                snapshot = latestLog.snapshotBeforeReview,
-                nowMillis = nowMillis
-            )
+                val restored = Sm2Engine.restoreFromSnapshot(
+                    card = cardEntity.toDomain(),
+                    snapshot = latestLog.snapshotBeforeReview,
+                    nowMillis = nowMillis
+                )
 
-            cardDao.upsertCard(restored.toEntity())
-            reviewLogDao.markLogUndone(
-                logId = latestLog.id,
-                updatedAtMillis = nowMillis,
-                syncStatus = SyncStatus.PENDING_SYNC
-            )
-            restoredCard = restored
+                cardDao.upsertCard(restored.toEntity())
+                reviewLogDao.markLogUndone(
+                    logId = latestLog.id,
+                    updatedAtMillis = nowMillis,
+                    syncStatus = SyncStatus.PENDING_SYNC
+                )
+                restoredCard = restored
+            }
+
+            lastSubmittedCardId = null
+            lastSubmittedAtMillis = -1L
+            lastSubmittedCardResult = null
+
+            restoredCard ?: throw IllegalStateException("Không thể hoàn tác lượt đánh giá.")
         }
-
-        restoredCard ?: throw IllegalStateException("Không thể hoàn tác lượt đánh giá.")
     }
 
     override fun getButtonPreviewLabels(card: Card): Map<ReviewQuality, String> {
@@ -230,5 +260,9 @@ class RoomStudySessionRepository(
         } else {
             clean
         }
+    }
+
+    companion object {
+        const val DUPLICATE_SUBMISSION_WINDOW_MILLIS: Long = 800L
     }
 }
