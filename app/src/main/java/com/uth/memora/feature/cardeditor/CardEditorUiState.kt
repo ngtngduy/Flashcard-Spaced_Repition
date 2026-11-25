@@ -1,5 +1,6 @@
 package com.uth.memora.feature.cardeditor
 
+import com.uth.memora.core.model.Card
 import com.uth.memora.core.model.Deck
 import com.uth.memora.core.model.PartOfSpeech
 import com.uth.memora.core.model.UserPreferences
@@ -19,6 +20,7 @@ data class CardEditorUiState(
     val isLoading: Boolean = true,
     val isEditMode: Boolean = false,
     val cardId: String? = null,
+    val originalCard: Card? = null,
     val selectedDeckId: String = "",
     val availableDecks: List<CardEditorDeckOption> = emptyList(),
     val word: String = "",
@@ -60,6 +62,27 @@ data class CardEditorUiState(
             exampleError != null ||
             deckError != null ||
             imageError != null
+
+    val hasUnsavedChanges: Boolean
+        get() {
+            val original = originalCard
+            return if (isEditMode && original != null) {
+                selectedDeckId != original.deckId ||
+                    word.trim() != original.word ||
+                    phonetic.trim() != original.phonetic ||
+                    partOfSpeech != original.partOfSpeech ||
+                    meaning.trim() != original.meaning ||
+                    example.trim() != original.example ||
+                    localImagePath != original.localImagePath
+            } else {
+                word.isNotBlank() ||
+                    phonetic.isNotBlank() ||
+                    partOfSpeech != null ||
+                    meaning.isNotBlank() ||
+                    example.isNotBlank() ||
+                    !localImagePath.isNullOrBlank()
+            }
+        }
 
     companion object {
         const val MAX_IMAGE_SIZE_BYTES = 500 * 1024L // 500KB (Figma 2197:23 & Mục 6.3)

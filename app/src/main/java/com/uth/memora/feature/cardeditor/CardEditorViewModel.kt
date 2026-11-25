@@ -65,6 +65,7 @@ class CardEditorViewModel(
                     _uiState.update {
                         it.copy(
                             isEditMode = true,
+                            originalCard = existingCard,
                             selectedDeckId = existingCard.deckId,
                             word = existingCard.word,
                             phonetic = existingCard.phonetic,
@@ -73,6 +74,14 @@ class CardEditorViewModel(
                             example = existingCard.example,
                             localImagePath = existingCard.localImagePath,
                             continuousAddMode = false
+                        )
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            isEditMode = true,
+                            continuousAddMode = false,
+                            errorMessage = "Không tìm thấy thẻ từ vựng cần chỉnh sửa."
                         )
                     }
                 }
@@ -411,8 +420,8 @@ class CardEditorViewModel(
             return
         }
 
-        // Kiểm tra trùng từ trong cùng bộ từ khi thêm mới (nếu chưa xác nhận allowDuplicateWord)
-        if (!state.isEditMode && !allowDuplicateWord) {
+        // Kiểm tra trùng từ trong cùng bộ từ (nếu chưa xác nhận allowDuplicateWord)
+        if (!allowDuplicateWord) {
             val isDuplicateInDeck = cachedActiveCards.any { card ->
                 card.deckId == targetDeckId &&
                     card.id != state.cardId &&

@@ -64,6 +64,7 @@ import com.uth.memora.core.model.Deck
 import com.uth.memora.core.model.PartOfSpeech
 import com.uth.memora.feature.cardeditor.components.AutoFillButton
 import com.uth.memora.feature.common.ConfirmDialog
+import com.uth.memora.feature.common.MemoraStatusBadge
 import com.uth.memora.feature.common.shimmer.shimmerEffect
 import com.uth.memora.feature.theme.MemoraTheme
 
@@ -171,10 +172,31 @@ fun CardEditorScreen(
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Text(
-                        text = "Chọn bộ từ và tạo thẻ từ vựng của riêng bạn.",
+                        text = if (uiState.isEditMode) {
+                            "Chỉnh sửa nội dung từ vựng mà vẫn giữ nguyên tiến độ ôn tập SM-2 hiện tại."
+                        } else {
+                            "Chọn bộ từ và tạo thẻ từ vựng của riêng bạn."
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    if (uiState.isEditMode && uiState.originalCard != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            MemoraStatusBadge(stage = uiState.originalCard.retentionStage)
+                            if (uiState.originalCard.interval > 0) {
+                                Text(
+                                    text = "Chu kỳ ôn: ${uiState.originalCard.interval} ngày",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
                 }
 
                 // Thông báo phản hồi & số thẻ đã thêm trong phiên
