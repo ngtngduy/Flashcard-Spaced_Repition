@@ -1,0 +1,683 @@
+package com.uth.memora.feature.cardeditor
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import com.uth.memora.core.model.Card
+import com.uth.memora.core.model.Deck
+import com.uth.memora.feature.theme.MemoraTheme
+
+/**
+ * Màn hình Thêm / Sửa Flashcard (Card Editor - Figma Node 2101:9 & Mục 6.3).
+ * Hỗ trợ chế độ thêm liên tục (giữ nguyên bộ từ, làm trống form sau khi lưu) và các khe cắm
+ * mở rộng cho bộ chọn bộ từ, loại từ, nút AI Auto-Fill và chọn ảnh minh họa.
+ */
+@Composable
+fun CardEditorScreen(
+    uiState: CardEditorUiState,
+    onWordChange: (String) -> Unit,
+    onPhoneticChange: (String) -> Unit,
+    onMeaningChange: (String) -> Unit,
+    onExampleChange: (String) -> Unit,
+    onToggleContinuousAddMode: (Boolean) -> Unit,
+    onSaveClick: () -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    deckSelectorContent: (@Composable () -> Unit)? = null,
+    autoFillButtonContent: (@Composable () -> Unit)? = null,
+    partOfSpeechPickerContent: (@Composable () -> Unit)? = null,
+    imagePickerContent: (@Composable () -> Unit)? = null
+) {
+    val isFormEditable = !uiState.isSaving && !uiState.isAutoFilling
+
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        containerColor = MaterialTheme.colorScheme.background
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
+            // App Header (Figma 2094:74)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp)
+                    .padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = onBack,
+                    enabled = !uiState.isSaving
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Quay lại",
+                        tint = MaterialTheme.colorScheme.onBackground
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = if (uiState.isEditMode) "Chỉnh sửa Flashcard" else "Thêm Flashcard mới",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            HorizontalDivider(
+                thickness = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                // Phần giới thiệu (Figma 2094:80)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = if (uiState.isEditMode) {
+                            "Cập nhật thông tin flashcard."
+                        } else {
+                            "Thêm từ, nhớ lâu hơn."
+                        },
+                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Text(
+                        text = "Chọn bộ từ và tạo thẻ từ vựng của riêng bạn.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                // Thông báo phản hồi & số thẻ đã thêm trong phiên
+                uiState.feedbackMessage?.let { msg ->
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = msg,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (uiState.cardsAddedInSessionCount > 0) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.primary
+                                ) {
+                                    Text(
+                                        text = "+${uiState.cardsAddedInSessionCount}",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Thông báo lỗi chung
+                uiState.errorMessage?.let { err ->
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.errorContainer
+                    ) {
+                        Text(
+                            text = err,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                        )
+                    }
+                }
+
+                // Khe cắm chọn bộ từ hoặc hiển thị tóm tắt bộ từ đang chọn
+                if (deckSelectorContent != null) {
+                    deckSelectorContent()
+                } else {
+                    uiState.selectedDeckOption?.let { option ->
+                        SelectedDeckSummaryCard(option = option)
+                    }
+                }
+
+                // Trường 1: Từ hoặc cụm từ tiếng Anh (Figma 2094:92)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CardEditorFieldHeader(
+                        label = "Từ hoặc cụm từ tiếng Anh",
+                        requirement = "Bắt buộc"
+                    )
+                    OutlinedTextField(
+                        value = uiState.word,
+                        onValueChange = onWordChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        enabled = isFormEditable,
+                        isError = uiState.wordError != null,
+                        shape = RoundedCornerShape(10.dp),
+                        placeholder = {
+                            Text(
+                                text = "Ví dụ: Resilient",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        supportingText = {
+                            Text(
+                                text = uiState.wordError ?: "1–${Card.MAX_WORD_LENGTH} ký tự",
+                                color = if (uiState.wordError != null) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        },
+                        colors = cardEditorTextFieldColors()
+                    )
+
+                    if (autoFillButtonContent != null) {
+                        autoFillButtonContent()
+                    }
+                }
+
+                // Trường 2: Phiên âm IPA & Loại từ (Figma 2197:2)
+                if (partOfSpeechPickerContent != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            PhoneticFieldSection(
+                                phonetic = uiState.phonetic,
+                                phoneticError = uiState.phoneticError,
+                                enabled = isFormEditable,
+                                onPhoneticChange = onPhoneticChange
+                            )
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            partOfSpeechPickerContent()
+                        }
+                    }
+                } else {
+                    PhoneticFieldSection(
+                        phonetic = uiState.phonetic,
+                        phoneticError = uiState.phoneticError,
+                        enabled = isFormEditable,
+                        onPhoneticChange = onPhoneticChange
+                    )
+                }
+
+                // Trường 3: Nghĩa tiếng Việt (Figma 2094:99)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CardEditorFieldHeader(
+                        label = "Nghĩa tiếng Việt",
+                        requirement = "Bắt buộc"
+                    )
+                    OutlinedTextField(
+                        value = uiState.meaning,
+                        onValueChange = onMeaningChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3,
+                        maxLines = 5,
+                        enabled = isFormEditable,
+                        isError = uiState.meaningError != null,
+                        shape = RoundedCornerShape(10.dp),
+                        placeholder = {
+                            Text(
+                                text = "Kiên cường; có khả năng phục hồi nhanh sau khó khăn.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        supportingText = {
+                            Text(
+                                text = uiState.meaningError ?: "1–${Card.MAX_MEANING_LENGTH} ký tự",
+                                color = if (uiState.meaningError != null) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        },
+                        colors = cardEditorTextFieldColors()
+                    )
+                }
+
+                // Trường 4: Câu ví dụ (Figma 2094:106)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CardEditorFieldHeader(
+                        label = "Câu ví dụ",
+                        requirement = "Không bắt buộc"
+                    )
+                    OutlinedTextField(
+                        value = uiState.example,
+                        onValueChange = onExampleChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                        maxLines = 4,
+                        enabled = isFormEditable,
+                        isError = uiState.exampleError != null,
+                        shape = RoundedCornerShape(10.dp),
+                        placeholder = {
+                            Text(
+                                text = "She stayed resilient through every challenge.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        supportingText = {
+                            Text(
+                                text = uiState.exampleError ?: "Tối đa ${Card.MAX_EXAMPLE_LENGTH} ký tự",
+                                color = if (uiState.exampleError != null) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        },
+                        colors = cardEditorTextFieldColors()
+                    )
+                }
+
+                // Khe cắm chọn ảnh minh họa (G7)
+                if (imagePickerContent != null) {
+                    imagePickerContent()
+                }
+
+                // Chế độ thêm liên tục (chỉ hiển thị khi thêm thẻ mới)
+                if (!uiState.isEditMode) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    text = "Thêm liên tục",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Giữ nguyên bộ từ và làm trống form sau khi lưu",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = uiState.continuousAddMode,
+                                onCheckedChange = onToggleContinuousAddMode,
+                                enabled = !uiState.isSaving
+                            )
+                        }
+                    }
+                }
+
+                // Mẹo học tập (Figma 2094:113)
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surface
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Min),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(3.dp)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(topStart = 10.dp, bottomStart = 10.dp))
+                                .background(MaterialTheme.colorScheme.primary)
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 14.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lightbulb,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "Thẻ mới sẽ sẵn sàng cho phiên ôn tập tiếp theo.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // Nút Lưu & Hủy (Figma 2094:116)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val primaryLabel = when {
+                        uiState.isSaving -> "Đang lưu..."
+                        uiState.isEditMode -> "Lưu thay đổi"
+                        uiState.continuousAddMode -> "Lưu & Thêm thẻ tiếp"
+                        else -> "Thêm Flashcard"
+                    }
+
+                    Button(
+                        onClick = onSaveClick,
+                        enabled = !uiState.isSaving && !uiState.isAutoFilling,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        )
+                    ) {
+                        Icon(
+                            imageVector = if (uiState.isEditMode) Icons.Default.Check else Icons.Default.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = primaryLabel,
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+
+                    TextButton(
+                        onClick = onBack,
+                        enabled = !uiState.isSaving,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Hủy",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SelectedDeckSummaryCard(
+    option: CardEditorDeckOption,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = "Bộ từ đang chọn",
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    modifier = Modifier.size(40.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Layers,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = option.deck.name,
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "${option.cardCount} thẻ trong bộ",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CardEditorFieldHeader(
+    label: String,
+    requirement: String,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Text(
+            text = requirement,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun PhoneticFieldSection(
+    phonetic: String,
+    phoneticError: String?,
+    enabled: Boolean,
+    onPhoneticChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        CardEditorFieldHeader(
+            label = "Phiên âm IPA",
+            requirement = "Không bắt buộc"
+        )
+        OutlinedTextField(
+            value = phonetic,
+            onValueChange = onPhoneticChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            enabled = enabled,
+            isError = phoneticError != null,
+            shape = RoundedCornerShape(10.dp),
+            placeholder = {
+                Text(
+                    text = "/rɪˈzɪliənt/",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            supportingText = {
+                Text(
+                    text = phoneticError ?: "Tối đa ${Card.MAX_PHONETIC_LENGTH} ký tự",
+                    color = if (phoneticError != null) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+            },
+            colors = cardEditorTextFieldColors()
+        )
+    }
+}
+
+@Composable
+private fun cardEditorTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedContainerColor = MaterialTheme.colorScheme.surface,
+    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+    disabledContainerColor = MaterialTheme.colorScheme.surface,
+    focusedBorderColor = MaterialTheme.colorScheme.primary,
+    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+)
+
+@Preview(name = "CardEditorScreen - Dark", widthDp = 360, showBackground = true)
+@Composable
+private fun CardEditorScreenDarkPreview() {
+    MemoraTheme(darkTheme = true) {
+        CardEditorScreen(
+            uiState = CardEditorUiState(
+                isLoading = false,
+                selectedDeckId = "d1",
+                availableDecks = listOf(
+                    CardEditorDeckOption(
+                        deck = Deck(id = "d1", name = "Everyday English"),
+                        cardCount = 96
+                    )
+                ),
+                word = "Resilient",
+                phonetic = "/rɪˈzɪliənt/",
+                meaning = "Kiên cường; có khả năng phục hồi nhanh sau khó khăn.",
+                example = "She stayed resilient through every challenge."
+            ),
+            onWordChange = {},
+            onPhoneticChange = {},
+            onMeaningChange = {},
+            onExampleChange = {},
+            onToggleContinuousAddMode = {},
+            onSaveClick = {},
+            onBack = {}
+        )
+    }
+}
+
+@Preview(name = "CardEditorScreen - Light", widthDp = 360, showBackground = true)
+@Composable
+private fun CardEditorScreenLightPreview() {
+    MemoraTheme(darkTheme = false) {
+        CardEditorScreen(
+            uiState = CardEditorUiState(
+                isLoading = false,
+                isEditMode = true,
+                selectedDeckId = "d1",
+                availableDecks = listOf(
+                    CardEditorDeckOption(
+                        deck = Deck(id = "d1", name = "Everyday English"),
+                        cardCount = 96
+                    )
+                ),
+                word = "Resilient",
+                phonetic = "/rɪˈzɪliənt/",
+                meaning = "Kiên cường; có khả năng phục hồi nhanh sau khó khăn.",
+                example = "She stayed resilient through every challenge."
+            ),
+            onWordChange = {},
+            onPhoneticChange = {},
+            onMeaningChange = {},
+            onExampleChange = {},
+            onToggleContinuousAddMode = {},
+            onSaveClick = {},
+            onBack = {}
+        )
+    }
+}

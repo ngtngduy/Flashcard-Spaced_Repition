@@ -1,9 +1,17 @@
 package com.uth.memora.feature.cardeditor
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import com.uth.memora.feature.common.PlaceholderScreen
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.uth.memora.memoraViewModelFactory
 
+/**
+ * Điểm vào điều hướng của màn Thêm / Sửa Flashcard (Figma 2101:9).
+ * Kết nối [CardEditorViewModel] thông qua [memoraViewModelFactory] với [CardEditorScreen].
+ */
 @Composable
 fun CardEditorRoute(
     deckId: String,
@@ -12,10 +20,38 @@ fun CardEditorRoute(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    PlaceholderScreen(
-        title = if (cardId == null) "Thêm thẻ mới (Add Flashcard)" else "Chỉnh sửa thẻ (Edit Flashcard)",
-        owner = "Người 2 – UI & Luồng học",
-        description = "Figma 2101:9 · Form nhập từ vựng, nút Gợi ý điền bằng AI (30/30 lượt/ngày) và chọn ảnh thẻ.",
+    val viewModel: CardEditorViewModel = viewModel(
+        key = "card_editor_${deckId}_${cardId ?: "new"}",
+        factory = memoraViewModelFactory { container ->
+            CardEditorViewModel(
+                initialDeckId = deckId,
+                cardId = cardId,
+                deckRepository = container.deckRepository,
+                cardRepository = container.cardRepository,
+                userPreferencesRepository = container.userPreferencesRepository,
+                aiCardAutoFillService = container.aiCardAutoFillService
+            )
+        }
+    )
+
+    val uiState by viewModel.uiState.collectAsState()
+
+    LaunchedEffect(uiState.shouldCloseScreen) {
+        if (uiState.shouldCloseScreen) {
+            viewModel.onScreenClosed()
+            onCardSaved()
+        }
+    }
+
+    CardEditorScreen(
+        uiState = uiState,
+        onWordChange = viewModel::onWordChange,
+        onPhoneticChange = viewModel::onPhoneticChange,
+        onMeaningChange = viewModel::onMeaningChange,
+        onExampleChange = viewModel::onExampleChange,
+        onToggleContinuousAddMode = viewModel::onToggleContinuousAddMode,
+        onSaveClick = { viewModel.saveCard(closeAfterSave = false) },
+        onBack = onBack,
         modifier = modifier
     )
 }
