@@ -2,6 +2,7 @@ package com.uth.memora.feature.cardeditor
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,10 +23,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -38,6 +42,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,6 +55,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.uth.memora.core.model.Card
 import com.uth.memora.core.model.Deck
+import com.uth.memora.core.model.PartOfSpeech
 import com.uth.memora.feature.theme.MemoraTheme
 
 /**
@@ -65,6 +74,8 @@ fun CardEditorScreen(
     onSaveClick: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onSelectDeck: (String) -> Unit = {},
+    onPartOfSpeechChange: (PartOfSpeech?) -> Unit = {},
     deckSelectorContent: (@Composable () -> Unit)? = null,
     autoFillButtonContent: (@Composable () -> Unit)? = null,
     partOfSpeechPickerContent: (@Composable () -> Unit)? = null,
@@ -193,13 +204,17 @@ fun CardEditorScreen(
                     }
                 }
 
-                // Khe cắm chọn bộ từ hoặc hiển thị tóm tắt bộ từ đang chọn
+                // Dropdown chọn bộ từ đích (Figma 2094:83..2094:90)
                 if (deckSelectorContent != null) {
                     deckSelectorContent()
                 } else {
-                    uiState.selectedDeckOption?.let { option ->
-                        SelectedDeckSummaryCard(option = option)
-                    }
+                    DeckDropdownSelector(
+                        availableDecks = uiState.availableDecks,
+                        selectedOption = uiState.selectedDeckOption,
+                        deckError = uiState.deckError,
+                        enabled = isFormEditable,
+                        onSelectDeck = onSelectDeck
+                    )
                 }
 
                 // Trường 1: Từ hoặc cụm từ tiếng Anh (Figma 2094:92)
@@ -240,8 +255,8 @@ fun CardEditorScreen(
                     }
                 }
 
-                // Trường 2: Phiên âm IPA & Loại từ (Figma 2197:2)
-                if (partOfSpeechPickerContent != null) {
+                // Trường 2: Phiên âm IPA & Loại từ 7 lựa chọn (Figma 2197:2..2197:16)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -256,15 +271,21 @@ fun CardEditorScreen(
                             )
                         }
                         Box(modifier = Modifier.weight(1f)) {
-                            partOfSpeechPickerContent()
+                            if (partOfSpeechPickerContent != null) {
+                                partOfSpeechPickerContent()
+                            } else {
+                                PartOfSpeechDropdownPicker(
+                                    selectedPartOfSpeech = uiState.partOfSpeech,
+                                    enabled = isFormEditable,
+                                    onPartOfSpeechChange = onPartOfSpeechChange
+                                )
+                            }
                         }
                     }
-                } else {
-                    PhoneticFieldSection(
-                        phonetic = uiState.phonetic,
-                        phoneticError = uiState.phoneticError,
-                        enabled = isFormEditable,
-                        onPhoneticChange = onPhoneticChange
+                    Text(
+                        text = "Lựa chọn: Danh từ, Động từ, Tính từ, Trạng từ, Giới từ, Liên từ, Khác.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
@@ -480,66 +501,266 @@ fun CardEditorScreen(
     }
 }
 
+/**
+ * Hộp chọn Bộ từ đích (Dropdown chọn bộ từ - Figma 2094:83..2094:90).
+ */
 @Composable
-private fun SelectedDeckSummaryCard(
-    option: CardEditorDeckOption,
+fun DeckDropdownSelector(
+    availableDecks: List<CardEditorDeckOption>,
+    selectedOption: CardEditorDeckOption?,
+    deckError: String?,
+    enabled: Boolean,
+    onSelectDeck: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var expanded by remember { mutableStateOf(false) }
+    val borderColor = if (deckError != null) {
+        MaterialTheme.colorScheme.error
+    } else {
+        MaterialTheme.colorScheme.primary
+    }
+
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
-            text = "Bộ từ đang chọn",
+            text = "Chọn bộ từ",
             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
             color = MaterialTheme.colorScheme.onBackground
         )
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(10.dp),
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
-        ) {
-            Row(
+
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable(enabled = enabled && availableDecks.isNotEmpty()) {
+                        expanded = true
+                    },
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(2.dp, borderColor)
             ) {
-                Surface(
-                    modifier = Modifier.size(40.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.Layers,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(22.dp)
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Layers,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = selectedOption?.deck?.name ?: "Chưa chọn bộ từ",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = if (selectedOption != null) {
+                                "Bộ dùng gần nhất · ${selectedOption.cardCount} thẻ"
+                            } else {
+                                "Vui lòng tạo bộ từ trước khi thêm thẻ"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
-                }
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    Text(
-                        text = option.deck.name,
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Mở danh sách chọn bộ từ",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
                     )
-                    Text(
-                        text = "${option.cardCount} thẻ trong bộ",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                }
+            }
+
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.fillMaxWidth(0.9f)
+            ) {
+                availableDecks.forEach { option ->
+                    val isSelected = option.deck.id == selectedOption?.deck?.id
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(
+                                    text = option.deck.name,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                )
+                                Text(
+                                    text = "${option.cardCount} thẻ",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        },
+                        trailingIcon = {
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Đang chọn",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        },
+                        onClick = {
+                            expanded = false
+                            onSelectDeck(option.deck.id)
+                        }
                     )
                 }
             }
         }
+
+        if (deckError != null) {
+            Text(
+                text = deckError,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+    }
+}
+
+/**
+ * Dropdown chọn 7 Loại từ [PartOfSpeech] theo Figma 2197:9..2197:15:
+ * Danh từ, Động từ, Tính từ, Trạng từ, Giới từ, Liên từ, Khác (hoặc Không chọn).
+ */
+@Composable
+fun PartOfSpeechDropdownPicker(
+    selectedPartOfSpeech: PartOfSpeech?,
+    enabled: Boolean,
+    onPartOfSpeechChange: (PartOfSpeech?) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = "Loại từ",
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onBackground
+        )
+
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable(enabled = enabled) { expanded = true },
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = selectedPartOfSpeech?.labelVi ?: "Chọn loại từ",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (selectedPartOfSpeech != null) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Chọn loại từ",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = "Không chọn",
+                            fontWeight = if (selectedPartOfSpeech == null) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        onPartOfSpeechChange(null)
+                    }
+                )
+                PartOfSpeech.entries.forEach { pos ->
+                    val isSelected = selectedPartOfSpeech == pos
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = "${pos.labelVi} (${pos.abbr}.)",
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
+                        trailingIcon = {
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Đang chọn",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        },
+                        onClick = {
+                            expanded = false
+                            onPartOfSpeechChange(pos)
+                        }
+                    )
+                }
+            }
+        }
+
+        Text(
+            text = "Không bắt buộc",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 4.dp)
+        )
     }
 }
 

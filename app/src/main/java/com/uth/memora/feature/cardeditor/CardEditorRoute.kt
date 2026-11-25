@@ -45,8 +45,10 @@ fun CardEditorRoute(
 
     CardEditorScreen(
         uiState = uiState,
+        onSelectDeck = viewModel::onSelectDeck,
         onWordChange = viewModel::onWordChange,
         onPhoneticChange = viewModel::onPhoneticChange,
+        onPartOfSpeechChange = viewModel::onPartOfSpeechChange,
         onMeaningChange = viewModel::onMeaningChange,
         onExampleChange = viewModel::onExampleChange,
         onToggleContinuousAddMode = viewModel::onToggleContinuousAddMode,
