@@ -53,6 +53,14 @@ data class CardEditorUiState(
     val isAiQuotaAvailable: Boolean
         get() = aiAutoFillRemainingToday > 0
 
+    val hasValidationError: Boolean
+        get() = wordError != null ||
+            phoneticError != null ||
+            meaningError != null ||
+            exampleError != null ||
+            deckError != null ||
+            imageError != null
+
     companion object {
         const val MAX_IMAGE_SIZE_BYTES = 500 * 1024L // 500KB (Figma 2197:23 & Mục 6.3)
     }

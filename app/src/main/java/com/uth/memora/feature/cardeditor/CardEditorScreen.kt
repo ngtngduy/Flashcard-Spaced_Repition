@@ -238,13 +238,11 @@ fun CardEditorScreen(
                             )
                         },
                         supportingText = {
-                            Text(
-                                text = uiState.wordError ?: "1–${Card.MAX_WORD_LENGTH} ký tự",
-                                color = if (uiState.wordError != null) {
-                                    MaterialTheme.colorScheme.error
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
+                            CardEditorSupportingCounterText(
+                                errorText = uiState.wordError,
+                                defaultHintText = "1–${Card.MAX_WORD_LENGTH} ký tự",
+                                currentLength = uiState.word.trim().length,
+                                maxLength = Card.MAX_WORD_LENGTH
                             )
                         },
                         colors = cardEditorTextFieldColors()
@@ -311,13 +309,11 @@ fun CardEditorScreen(
                             )
                         },
                         supportingText = {
-                            Text(
-                                text = uiState.meaningError ?: "1–${Card.MAX_MEANING_LENGTH} ký tự",
-                                color = if (uiState.meaningError != null) {
-                                    MaterialTheme.colorScheme.error
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
+                            CardEditorSupportingCounterText(
+                                errorText = uiState.meaningError,
+                                defaultHintText = "1–${Card.MAX_MEANING_LENGTH} ký tự",
+                                currentLength = uiState.meaning.trim().length,
+                                maxLength = Card.MAX_MEANING_LENGTH
                             )
                         },
                         colors = cardEditorTextFieldColors()
@@ -346,13 +342,11 @@ fun CardEditorScreen(
                             )
                         },
                         supportingText = {
-                            Text(
-                                text = uiState.exampleError ?: "Tối đa ${Card.MAX_EXAMPLE_LENGTH} ký tự",
-                                color = if (uiState.exampleError != null) {
-                                    MaterialTheme.colorScheme.error
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
+                            CardEditorSupportingCounterText(
+                                errorText = uiState.exampleError,
+                                defaultHintText = "Tối đa ${Card.MAX_EXAMPLE_LENGTH} ký tự",
+                                currentLength = uiState.example.trim().length,
+                                maxLength = Card.MAX_EXAMPLE_LENGTH
                             )
                         },
                         colors = cardEditorTextFieldColors()
@@ -819,16 +813,55 @@ private fun PhoneticFieldSection(
                 )
             },
             supportingText = {
-                Text(
-                    text = phoneticError ?: "Tối đa ${Card.MAX_PHONETIC_LENGTH} ký tự",
-                    color = if (phoneticError != null) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    }
+                CardEditorSupportingCounterText(
+                    errorText = phoneticError,
+                    defaultHintText = "Tối đa ${Card.MAX_PHONETIC_LENGTH}",
+                    currentLength = phonetic.trim().length,
+                    maxLength = Card.MAX_PHONETIC_LENGTH
                 )
             },
             colors = cardEditorTextFieldColors()
+        )
+    }
+}
+
+/**
+ * Dòng chú thích dưới mỗi ô nhập liệu kết hợp thông báo lỗi và bộ đếm số ký tự trực tiếp (Mục 6.3 & 11).
+ */
+@Composable
+private fun CardEditorSupportingCounterText(
+    errorText: String?,
+    defaultHintText: String,
+    currentLength: Int,
+    maxLength: Int,
+    modifier: Modifier = Modifier
+) {
+    val isOverLimit = currentLength > maxLength
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = errorText ?: defaultHintText,
+            color = if (errorText != null || isOverLimit) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 6.dp)
+        )
+        Text(
+            text = "$currentLength/$maxLength",
+            color = if (isOverLimit) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
         )
     }
 }
