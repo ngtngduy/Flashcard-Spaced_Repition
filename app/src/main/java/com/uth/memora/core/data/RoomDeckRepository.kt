@@ -136,11 +136,106 @@ class RoomDeckRepository(
         updatedDeck
     }
 
-    override suspend fun softDeleteDeck(deckId: String): Result<Unit> =
-        Result.failure(UnsupportedOperationException("Chưa cài đặt softDeleteDeck"))
+    override suspend fun softDeleteDeck(deckId: String): Result<Unit> = runCatching {
+        val cleanDeckId = deckId.trim()
+        if (cleanDeckId.isEmpty()) {
+            throw IllegalArgumentException("Mã bộ từ không hợp lệ.")
+        }
+        deckDao.getDeckById(cleanDeckId)
+            ?: throw NoSuchElementException("Không tìm thấy bộ từ.")
 
-    override suspend fun importPrebuiltDeck(prebuiltDeckId: String): Result<Deck> =
-        Result.failure(UnsupportedOperationException("Chưa cài đặt importPrebuiltDeck"))
+        val now = System.currentTimeMillis()
+        transactionRunner {
+            deckDao.softDeleteDeck(
+                deckId = cleanDeckId,
+                updatedAtMillis = now,
+                syncStatus = SyncStatus.PENDING_SYNC
+            )
+            cardDao.softDeleteCardsByDeck(
+                deckId = cleanDeckId,
+                updatedAtMillis = now,
+                syncStatus = SyncStatus.PENDING_SYNC
+            )
+        }
+    }
+
+    override suspend fun importPrebuiltDeck(prebuiltDeckId: String): Result<Deck> = runCatching {
+        val cleanPrebuiltId = prebuiltDeckId.trim()
+        if (cleanPrebuiltId.isEmpty()) {
+            throw IllegalArgumentException("Mã bộ từ có sẵn không hợp lệ.")
+        }
+        val ownerId = ownerIdProvider()
+        val existingImported = deckDao.getDeckBySourcePrebuiltId(ownerId, cleanPrebuiltId)
+        if (existingImported != null) {
+            return@runCatching existingImported.toDomain()
+        }
+
+        val activeDecks = deckDao.observeActiveDecks(ownerId).first()
+        if (activeDecks.size >= Deck.MAX_DECKS_PER_USER) {
+            throw IllegalStateException(
+                "Bạn đã đạt giới hạn tối đa ${Deck.MAX_DECKS_PER_USER} bộ từ."
+            )
+        }
+
+        val templateDeck = deckDao.getDeckById(cleanPrebuiltId)
+            ?: throw NoSuchElementException("Không tìm thấy bộ từ có sẵn.")
+
+        val now = System.currentTimeMillis()
+        val newDeckId = UUID.randomUUID().toString()
+        val candidateName = resolveUniqueImportedDeckName(templateDeck.name, activeDecks.map { it.name })
+        val importedDeck = Deck(
+            id = newDeckId,
+            ownerId = ownerId,
+            name = candidateName,
+            description = templateDeck.description,
+            sourcePrebuiltId = cleanPrebuiltId,
+            createdAtMillis = now,
+            updatedAtMillis = now,
+            isDeleted = false,
+            syncStatus = SyncStatus.PENDING_SYNC
+        )
+
+        val templateCards = cardDao.observeCardsByDeck(cleanPrebuiltId).first()
+        val copiedCards = templateCards.mapIndexed { index, cardEntity ->
+            cardEntity.copy(
+                id = UUID.randomUUID().toString(),
+                deckId = newDeckId,
+                ownerId = ownerId,
+                createdAtMillis = now + index,
+                updatedAtMillis = now + index,
+                isDeleted = false,
+                syncStatus = SyncStatus.PENDING_SYNC
+            )
+        }
+
+        transactionRunner {
+            deckDao.upsertDeck(importedDeck.toEntity())
+            if (copiedCards.isNotEmpty()) {
+                cardDao.upsertCards(copiedCards)
+            }
+        }
+        importedDeck
+    }
+
+    private fun resolveUniqueImportedDeckName(
+        baseName: String,
+        existingNames: List<String>
+    ): String {
+        val trimmedBase = baseName.trim().take(Deck.MAX_NAME_LENGTH)
+        if (existingNames.none { it.trim().equals(trimmedBase, ignoreCase = true) }) {
+            return trimmedBase
+        }
+        var suffixIndex = 2
+        while (true) {
+            val suffix = " ($suffixIndex)"
+            val maxBaseLen = (Deck.MAX_NAME_LENGTH - suffix.length).coerceAtLeast(1)
+            val candidate = trimmedBase.take(maxBaseLen) + suffix
+            if (existingNames.none { it.trim().equals(candidate, ignoreCase = true) }) {
+                return candidate
+            }
+            suffixIndex++
+        }
+    }
 
     private fun validateDeckInput(cleanName: String, cleanDescription: String) {
         if (cleanName.isEmpty() || cleanName.length > Deck.MAX_NAME_LENGTH) {
