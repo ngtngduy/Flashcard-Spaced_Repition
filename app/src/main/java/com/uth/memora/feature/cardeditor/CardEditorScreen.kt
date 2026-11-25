@@ -57,6 +57,7 @@ import com.uth.memora.core.model.Card
 import com.uth.memora.core.model.Deck
 import com.uth.memora.core.model.PartOfSpeech
 import com.uth.memora.feature.cardeditor.components.AutoFillButton
+import com.uth.memora.feature.common.shimmer.shimmerEffect
 import com.uth.memora.feature.theme.MemoraTheme
 
 /**
@@ -257,9 +258,16 @@ fun CardEditorScreen(
                             remainingQuota = uiState.aiAutoFillRemainingToday,
                             maxDailyQuota = uiState.aiAutoFillMaxDaily,
                             isLoading = uiState.isAutoFilling,
-                            enabled = !uiState.isSaving,
+                            enabled = !uiState.isSaving && uiState.isAiQuotaAvailable,
                             onClick = onAutoFillClick
                         )
+                        if (!uiState.isAiQuotaAvailable) {
+                            Text(
+                                text = "Bạn đã dùng hết ${uiState.aiAutoFillMaxDaily}/${uiState.aiAutoFillMaxDaily} lượt gợi ý AI hôm nay. Hạn mức sẽ tự động đặt lại vào ngày mai.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
 
@@ -275,6 +283,7 @@ fun CardEditorScreen(
                                 phonetic = uiState.phonetic,
                                 phoneticError = uiState.phoneticError,
                                 enabled = isFormEditable,
+                                isShimmerLoading = uiState.isAutoFilling,
                                 onPhoneticChange = onPhoneticChange
                             )
                         }
@@ -285,6 +294,7 @@ fun CardEditorScreen(
                                 PartOfSpeechDropdownPicker(
                                     selectedPartOfSpeech = uiState.partOfSpeech,
                                     enabled = isFormEditable,
+                                    isShimmerLoading = uiState.isAutoFilling,
                                     onPartOfSpeechChange = onPartOfSpeechChange
                                 )
                             }
@@ -303,31 +313,35 @@ fun CardEditorScreen(
                         label = "Nghĩa tiếng Việt",
                         requirement = "Bắt buộc"
                     )
-                    OutlinedTextField(
-                        value = uiState.meaning,
-                        onValueChange = onMeaningChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        minLines = 3,
-                        maxLines = 5,
-                        enabled = isFormEditable,
-                        isError = uiState.meaningError != null,
-                        shape = RoundedCornerShape(10.dp),
-                        placeholder = {
-                            Text(
-                                text = "Kiên cường; có khả năng phục hồi nhanh sau khó khăn.",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        },
-                        supportingText = {
-                            CardEditorSupportingCounterText(
-                                errorText = uiState.meaningError,
-                                defaultHintText = "1–${Card.MAX_MEANING_LENGTH} ký tự",
-                                currentLength = uiState.meaning.trim().length,
-                                maxLength = Card.MAX_MEANING_LENGTH
-                            )
-                        },
-                        colors = cardEditorTextFieldColors()
-                    )
+                    if (uiState.isAutoFilling) {
+                        CardEditorFieldShimmerBox(height = 104.dp)
+                    } else {
+                        OutlinedTextField(
+                            value = uiState.meaning,
+                            onValueChange = onMeaningChange,
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 3,
+                            maxLines = 5,
+                            enabled = isFormEditable,
+                            isError = uiState.meaningError != null,
+                            shape = RoundedCornerShape(10.dp),
+                            placeholder = {
+                                Text(
+                                    text = "Kiên cường; có khả năng phục hồi nhanh sau khó khăn.",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            supportingText = {
+                                CardEditorSupportingCounterText(
+                                    errorText = uiState.meaningError,
+                                    defaultHintText = "1–${Card.MAX_MEANING_LENGTH} ký tự",
+                                    currentLength = uiState.meaning.trim().length,
+                                    maxLength = Card.MAX_MEANING_LENGTH
+                                )
+                            },
+                            colors = cardEditorTextFieldColors()
+                        )
+                    }
                 }
 
                 // Trường 4: Câu ví dụ (Figma 2094:106)
@@ -336,31 +350,35 @@ fun CardEditorScreen(
                         label = "Câu ví dụ",
                         requirement = "Không bắt buộc"
                     )
-                    OutlinedTextField(
-                        value = uiState.example,
-                        onValueChange = onExampleChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        minLines = 2,
-                        maxLines = 4,
-                        enabled = isFormEditable,
-                        isError = uiState.exampleError != null,
-                        shape = RoundedCornerShape(10.dp),
-                        placeholder = {
-                            Text(
-                                text = "She stayed resilient through every challenge.",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        },
-                        supportingText = {
-                            CardEditorSupportingCounterText(
-                                errorText = uiState.exampleError,
-                                defaultHintText = "Tối đa ${Card.MAX_EXAMPLE_LENGTH} ký tự",
-                                currentLength = uiState.example.trim().length,
-                                maxLength = Card.MAX_EXAMPLE_LENGTH
-                            )
-                        },
-                        colors = cardEditorTextFieldColors()
-                    )
+                    if (uiState.isAutoFilling) {
+                        CardEditorFieldShimmerBox(height = 84.dp)
+                    } else {
+                        OutlinedTextField(
+                            value = uiState.example,
+                            onValueChange = onExampleChange,
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 2,
+                            maxLines = 4,
+                            enabled = isFormEditable,
+                            isError = uiState.exampleError != null,
+                            shape = RoundedCornerShape(10.dp),
+                            placeholder = {
+                                Text(
+                                    text = "She stayed resilient through every challenge.",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            supportingText = {
+                                CardEditorSupportingCounterText(
+                                    errorText = uiState.exampleError,
+                                    defaultHintText = "Tối đa ${Card.MAX_EXAMPLE_LENGTH} ký tự",
+                                    currentLength = uiState.example.trim().length,
+                                    maxLength = Card.MAX_EXAMPLE_LENGTH
+                                )
+                            },
+                            colors = cardEditorTextFieldColors()
+                        )
+                    }
                 }
 
                 // Khe cắm chọn ảnh minh họa (G7)
@@ -662,7 +680,8 @@ fun PartOfSpeechDropdownPicker(
     selectedPartOfSpeech: PartOfSpeech?,
     enabled: Boolean,
     onPartOfSpeechChange: (PartOfSpeech?) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isShimmerLoading: Boolean = false
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -676,85 +695,89 @@ fun PartOfSpeechDropdownPicker(
             color = MaterialTheme.colorScheme.onBackground
         )
 
-        Box(modifier = Modifier.fillMaxWidth()) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .clickable(enabled = enabled) { expanded = true },
-                shape = RoundedCornerShape(10.dp),
-                color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-            ) {
-                Row(
+        if (isShimmerLoading) {
+            CardEditorFieldShimmerBox(height = 56.dp)
+        } else {
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Surface(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(enabled = enabled) { expanded = true },
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                 ) {
-                    Text(
-                        text = selectedPartOfSpeech?.labelVi ?: "Chọn loại từ",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (selectedPartOfSpeech != null) {
-                            MaterialTheme.colorScheme.onSurface
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Icon(
-                        imageVector = Icons.Default.KeyboardArrowDown,
-                        contentDescription = "Chọn loại từ",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-
-            DropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false }
-            ) {
-                DropdownMenuItem(
-                    text = {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text = "Không chọn",
-                            fontWeight = if (selectedPartOfSpeech == null) FontWeight.Bold else FontWeight.Normal
+                            text = selectedPartOfSpeech?.labelVi ?: "Chọn loại từ",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (selectedPartOfSpeech != null) {
+                                MaterialTheme.colorScheme.onSurface
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
                         )
-                    },
-                    onClick = {
-                        expanded = false
-                        onPartOfSpeechChange(null)
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Chọn loại từ",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
-                )
-                PartOfSpeech.entries.forEach { pos ->
-                    val isSelected = selectedPartOfSpeech == pos
+                }
+
+                DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
                     DropdownMenuItem(
                         text = {
                             Text(
-                                text = "${pos.labelVi} (${pos.abbr}.)",
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                text = "Không chọn",
+                                fontWeight = if (selectedPartOfSpeech == null) FontWeight.Bold else FontWeight.Normal
                             )
-                        },
-                        trailingIcon = {
-                            if (isSelected) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = "Đang chọn",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
                         },
                         onClick = {
                             expanded = false
-                            onPartOfSpeechChange(pos)
+                            onPartOfSpeechChange(null)
                         }
                     )
+                    PartOfSpeech.entries.forEach { pos ->
+                        val isSelected = selectedPartOfSpeech == pos
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = "${pos.labelVi} (${pos.abbr}.)",
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            trailingIcon = {
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Đang chọn",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            },
+                            onClick = {
+                                expanded = false
+                                onPartOfSpeechChange(pos)
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -798,7 +821,8 @@ private fun PhoneticFieldSection(
     phoneticError: String?,
     enabled: Boolean,
     onPhoneticChange: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isShimmerLoading: Boolean = false
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -808,31 +832,52 @@ private fun PhoneticFieldSection(
             label = "Phiên âm IPA",
             requirement = "Không bắt buộc"
         )
-        OutlinedTextField(
-            value = phonetic,
-            onValueChange = onPhoneticChange,
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            enabled = enabled,
-            isError = phoneticError != null,
-            shape = RoundedCornerShape(10.dp),
-            placeholder = {
-                Text(
-                    text = "/rɪˈzɪliənt/",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            },
-            supportingText = {
-                CardEditorSupportingCounterText(
-                    errorText = phoneticError,
-                    defaultHintText = "Tối đa ${Card.MAX_PHONETIC_LENGTH}",
-                    currentLength = phonetic.trim().length,
-                    maxLength = Card.MAX_PHONETIC_LENGTH
-                )
-            },
-            colors = cardEditorTextFieldColors()
-        )
+        if (isShimmerLoading) {
+            CardEditorFieldShimmerBox(height = 56.dp)
+        } else {
+            OutlinedTextField(
+                value = phonetic,
+                onValueChange = onPhoneticChange,
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                enabled = enabled,
+                isError = phoneticError != null,
+                shape = RoundedCornerShape(10.dp),
+                placeholder = {
+                    Text(
+                        text = "/rɪˈzɪliənt/",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                supportingText = {
+                    CardEditorSupportingCounterText(
+                        errorText = phoneticError,
+                        defaultHintText = "Tối đa ${Card.MAX_PHONETIC_LENGTH}",
+                        currentLength = phonetic.trim().length,
+                        maxLength = Card.MAX_PHONETIC_LENGTH
+                    )
+                },
+                colors = cardEditorTextFieldColors()
+            )
+        }
     }
+}
+
+/**
+ * Hộp Shimmer Skeleton hiển thị trên các ô nhập liệu (IPA, Loại từ, Nghĩa, Ví dụ) khi đang chờ AI gợi ý (Mục 6.3 & 11).
+ */
+@Composable
+private fun CardEditorFieldShimmerBox(
+    height: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(RoundedCornerShape(10.dp))
+            .shimmerEffect()
+    )
 }
 
 /**
