@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import com.uth.memora.core.model.Card
 import com.uth.memora.core.model.Deck
 import com.uth.memora.core.model.PartOfSpeech
+import com.uth.memora.feature.cardeditor.components.AutoFillButton
 import com.uth.memora.feature.theme.MemoraTheme
 
 /**
@@ -76,6 +77,7 @@ fun CardEditorScreen(
     modifier: Modifier = Modifier,
     onSelectDeck: (String) -> Unit = {},
     onPartOfSpeechChange: (PartOfSpeech?) -> Unit = {},
+    onAutoFillClick: () -> Unit = {},
     deckSelectorContent: (@Composable () -> Unit)? = null,
     autoFillButtonContent: (@Composable () -> Unit)? = null,
     partOfSpeechPickerContent: (@Composable () -> Unit)? = null,
@@ -250,6 +252,14 @@ fun CardEditorScreen(
 
                     if (autoFillButtonContent != null) {
                         autoFillButtonContent()
+                    } else {
+                        AutoFillButton(
+                            remainingQuota = uiState.aiAutoFillRemainingToday,
+                            maxDailyQuota = uiState.aiAutoFillMaxDaily,
+                            isLoading = uiState.isAutoFilling,
+                            enabled = !uiState.isSaving,
+                            onClick = onAutoFillClick
+                        )
                     }
                 }
 

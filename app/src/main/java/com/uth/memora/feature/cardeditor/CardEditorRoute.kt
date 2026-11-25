@@ -51,6 +51,7 @@ fun CardEditorRoute(
         onPartOfSpeechChange = viewModel::onPartOfSpeechChange,
         onMeaningChange = viewModel::onMeaningChange,
         onExampleChange = viewModel::onExampleChange,
+        onAutoFillClick = viewModel::autoFillWithAi,
         onToggleContinuousAddMode = viewModel::onToggleContinuousAddMode,
         onSaveClick = { viewModel.saveCard(closeAfterSave = false) },
         onBack = onBack,
