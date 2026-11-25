@@ -109,7 +109,30 @@ class RoomStudySessionRepository(
         cardId: String,
         quality: ReviewQuality,
         durationValidSeconds: Int
-    ): Result<Card> = Result.failure(UnsupportedOperationException("Chưa cài đặt submitCardReview"))
+    ): Result<Card> = runCatching {
+        val cleanCardId = cardId.trim()
+        val nowMillis = timeProvider()
+        val todayLearningDay = learningDayProvider()
+
+        var updatedCard: Card? = null
+        transactionRunner {
+            val existingEntity = cardDao.getCardById(cleanCardId)
+                ?: throw NoSuchElementException("Không tìm thấy thẻ.")
+            val currentCard = existingEntity.toDomain()
+
+            val computation = Sm2Engine.evaluateReview(
+                card = currentCard,
+                quality = quality,
+                currentLearningDay = todayLearningDay,
+                nowMillis = nowMillis
+            )
+
+            cardDao.upsertCard(computation.updatedCard.toEntity())
+            updatedCard = computation.updatedCard
+        }
+
+        updatedCard ?: throw IllegalStateException("Không thể cập nhật tiến độ thẻ.")
+    }
 
     override suspend fun undoLastReview(): Result<Card> =
         Result.failure(UnsupportedOperationException("Chưa cài đặt undoLastReview"))
