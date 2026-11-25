@@ -147,16 +147,114 @@ class RoomCardRepository(
         partOfSpeech: PartOfSpeech?,
         example: String,
         localImagePath: String?
-    ): Result<Card> = Result.failure(UnsupportedOperationException("Chưa cài đặt updateCardContent"))
+    ): Result<Card> = runCatching {
+        val cleanCardId = cardId.trim()
+        val existingEntity = cardDao.getCardById(cleanCardId)
+            ?: throw NoSuchElementException("Không tìm thấy thẻ.")
 
-    override suspend fun softDeleteCard(cardId: String): Result<Unit> =
-        Result.failure(UnsupportedOperationException("Chưa cài đặt softDeleteCard"))
+        val cleanDeckId = deckId.trim()
+        val targetDeck = deckDao.getDeckById(cleanDeckId)
+            ?: throw NoSuchElementException("Không tìm thấy bộ từ vựng.")
 
-    override suspend fun resetCardProgress(cardId: String): Result<Card> =
-        Result.failure(UnsupportedOperationException("Chưa cài đặt resetCardProgress"))
+        if (cleanDeckId != existingEntity.deckId) {
+            val targetDeckCount = cardDao.countActiveCardsInDeck(cleanDeckId)
+            if (targetDeckCount >= Deck.MAX_CARDS_PER_DECK) {
+                throw IllegalStateException(
+                    "Bộ từ đích đã đạt giới hạn tối đa ${Deck.MAX_CARDS_PER_DECK} thẻ."
+                )
+            }
+        }
 
-    override suspend fun resetDeckProgress(deckId: String): Result<Unit> =
-        Result.failure(UnsupportedOperationException("Chưa cài đặt resetDeckProgress"))
+        val cleanWord = word.trim()
+        val cleanMeaning = meaning.trim()
+        val cleanPhonetic = phonetic.trim()
+        val cleanExample = example.trim()
+        validateCardFields(
+            word = cleanWord,
+            meaning = cleanMeaning,
+            phonetic = cleanPhonetic,
+            example = cleanExample
+        )
+
+        val normalizedLocalImage = localImagePath?.takeIf { it.isNotBlank() }
+        val preservedCloudImageUrl = if (normalizedLocalImage == existingEntity.localImagePath) {
+            existingEntity.cloudImageUrl
+        } else {
+            null
+        }
+
+        val updatedCard = existingEntity.toDomain().copy(
+            deckId = cleanDeckId,
+            ownerId = targetDeck.ownerId,
+            word = cleanWord,
+            meaning = cleanMeaning,
+            phonetic = cleanPhonetic,
+            partOfSpeech = partOfSpeech,
+            example = cleanExample,
+            localImagePath = normalizedLocalImage,
+            cloudImageUrl = preservedCloudImageUrl,
+            updatedAtMillis = System.currentTimeMillis(),
+            syncStatus = SyncStatus.PENDING_SYNC
+        )
+
+        cardDao.upsertCard(updatedCard.toEntity())
+        updatedCard
+    }
+
+    override suspend fun softDeleteCard(cardId: String): Result<Unit> = runCatching {
+        val cleanCardId = cardId.trim()
+        cardDao.getCardById(cleanCardId)
+            ?: throw NoSuchElementException("Không tìm thấy thẻ.")
+
+        cardDao.softDeleteCard(
+            cardId = cleanCardId,
+            updatedAtMillis = System.currentTimeMillis(),
+            syncStatus = SyncStatus.PENDING_SYNC
+        )
+    }
+
+    override suspend fun resetCardProgress(cardId: String): Result<Card> = runCatching {
+        val cleanCardId = cardId.trim()
+        val existingEntity = cardDao.getCardById(cleanCardId)
+            ?: throw NoSuchElementException("Không tìm thấy thẻ.")
+
+        val now = System.currentTimeMillis()
+        cardDao.resetCardProgress(
+            cardId = cleanCardId,
+            updatedAtMillis = now,
+            easeFactor = Card.INITIAL_EASE_FACTOR,
+            state = CardState.NEW,
+            syncStatus = SyncStatus.PENDING_SYNC
+        )
+
+        existingEntity.toDomain().copy(
+            state = CardState.NEW,
+            easeFactor = Card.INITIAL_EASE_FACTOR,
+            repetitions = 0,
+            interval = 0,
+            lapses = 0,
+            dueDay = null,
+            dueAtMillis = null,
+            firstSeenDay = null,
+            lastReviewedAtMillis = null,
+            updatedAtMillis = now,
+            syncStatus = SyncStatus.PENDING_SYNC
+        )
+    }
+
+    override suspend fun resetDeckProgress(deckId: String): Result<Unit> = runCatching {
+        val cleanDeckId = deckId.trim()
+        deckDao.getDeckById(cleanDeckId)
+            ?: throw NoSuchElementException("Không tìm thấy bộ từ vựng.")
+
+        cardDao.resetDeckProgress(
+            deckId = cleanDeckId,
+            updatedAtMillis = System.currentTimeMillis(),
+            easeFactor = Card.INITIAL_EASE_FACTOR,
+            state = CardState.NEW,
+            syncStatus = SyncStatus.PENDING_SYNC
+        )
+    }
 
     override suspend fun autoFillCardContent(word: String): Result<AutoFillCardData> =
         Result.failure(UnsupportedOperationException("Chưa cài đặt autoFillCardContent"))
