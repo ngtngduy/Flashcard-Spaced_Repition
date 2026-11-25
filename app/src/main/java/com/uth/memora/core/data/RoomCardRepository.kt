@@ -9,6 +9,7 @@ import com.uth.memora.core.domain.AuthRepository
 import com.uth.memora.core.domain.AutoFillCardData
 import com.uth.memora.core.domain.CardRepository
 import com.uth.memora.core.domain.UserPreferencesRepository
+import com.uth.memora.core.domain.VietnameseTextNormalizer
 import com.uth.memora.core.model.Card
 import com.uth.memora.core.model.CardState
 import com.uth.memora.core.model.Deck
@@ -136,7 +137,22 @@ class RoomCardRepository(
         newCard
     }
 
-    override suspend fun searchCards(deckId: String?, query: String): List<Card> = emptyList()
+    override suspend fun searchCards(deckId: String?, query: String): List<Card> {
+        val cleanDeckId = deckId?.trim()?.takeIf { it.isNotEmpty() }
+        val activeCards = if (cleanDeckId != null) {
+            cardDao.observeCardsByDeck(cleanDeckId).first().map { it.toDomain() }
+        } else {
+            cardDao.getAllActiveCards(ownerIdProvider()).map { it.toDomain() }
+        }
+
+        val cleanQuery = query.trim()
+        if (cleanQuery.isEmpty()) return activeCards
+
+        return activeCards.filter { card ->
+            VietnameseTextNormalizer.matchesQuery(card.word, cleanQuery) ||
+                VietnameseTextNormalizer.matchesQuery(card.meaning, cleanQuery)
+        }
+    }
 
     override suspend fun updateCardContent(
         cardId: String,
