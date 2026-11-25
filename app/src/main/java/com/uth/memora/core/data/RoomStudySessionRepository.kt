@@ -174,8 +174,35 @@ class RoomStudySessionRepository(
         updatedCard ?: throw IllegalStateException("Không thể cập nhật tiến độ thẻ.")
     }
 
-    override suspend fun undoLastReview(): Result<Card> =
-        Result.failure(UnsupportedOperationException("Chưa cài đặt undoLastReview"))
+    override suspend fun undoLastReview(): Result<Card> = runCatching {
+        val ownerId = ownerIdProvider()
+        val nowMillis = timeProvider()
+        var restoredCard: Card? = null
+
+        transactionRunner {
+            val latestLog = reviewLogDao.getLatestActiveLog(ownerId)
+                ?: throw IllegalStateException("Không có lượt đánh giá nào để hoàn tác.")
+
+            val cardEntity = cardDao.getCardById(latestLog.cardId)
+                ?: throw NoSuchElementException("Không tìm thấy thẻ cần hoàn tác.")
+
+            val restored = Sm2Engine.restoreFromSnapshot(
+                card = cardEntity.toDomain(),
+                snapshot = latestLog.snapshotBeforeReview,
+                nowMillis = nowMillis
+            )
+
+            cardDao.upsertCard(restored.toEntity())
+            reviewLogDao.markLogUndone(
+                logId = latestLog.id,
+                updatedAtMillis = nowMillis,
+                syncStatus = SyncStatus.PENDING_SYNC
+            )
+            restoredCard = restored
+        }
+
+        restoredCard ?: throw IllegalStateException("Không thể hoàn tác lượt đánh giá.")
+    }
 
     override fun getButtonPreviewLabels(card: Card): Map<ReviewQuality, String> = emptyMap()
 
