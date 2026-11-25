@@ -34,6 +34,7 @@ class RoomCardRepository(
     private val preferencesRepository: UserPreferencesRepository,
     private val aiAutoFillService: AiCardAutoFillService,
     private val authRepository: AuthRepository? = null,
+    private val consumeQuotaOnSuccess: Boolean = true,
     private val ownerIdProvider: suspend () -> String = {
         authRepository?.getCurrentUser()?.uid?.takeIf { it.isNotBlank() } ?: Deck.GUEST_OWNER_ID
     }
@@ -272,8 +273,63 @@ class RoomCardRepository(
         )
     }
 
-    override suspend fun autoFillCardContent(word: String): Result<AutoFillCardData> =
-        Result.failure(UnsupportedOperationException("Chưa cài đặt autoFillCardContent"))
+    override suspend fun autoFillCardContent(word: String): Result<AutoFillCardData> {
+        val cleanWord = word.trim()
+        if (cleanWord.isEmpty()) {
+            return Result.failure(
+                IllegalArgumentException("Vui lòng nhập từ vựng trước khi gọi AI gợi ý.")
+            )
+        }
+        if (cleanWord.length > Card.MAX_WORD_LENGTH) {
+            return Result.failure(
+                IllegalArgumentException("Từ hoặc cụm từ tối đa ${Card.MAX_WORD_LENGTH} ký tự.")
+            )
+        }
+
+        val currentPrefs = runCatching { preferencesRepository.getUserPreferences() }.getOrNull()
+        if (currentPrefs != null && currentPrefs.aiAutoFillRemainingToday <= 0) {
+            return Result.failure(
+                IllegalStateException(
+                    "Bạn đã dùng hết 30 lượt AI Auto-Fill hôm nay (tự hồi lúc 4:00 sáng)."
+                )
+            )
+        }
+
+        val aiResult = try {
+            aiAutoFillService.autoFillCard(cleanWord)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Result.failure(e)
+        }
+
+        return aiResult.fold(
+            onSuccess = { data ->
+                if (consumeQuotaOnSuccess) {
+                    val quotaResult = preferencesRepository.consumeAutoFillQuota()
+                    if (quotaResult.isFailure) {
+                        return Result.failure(
+                            quotaResult.exceptionOrNull()
+                                ?: IllegalStateException(
+                                    "Bạn đã dùng hết 30 lượt AI Auto-Fill hôm nay (tự hồi lúc 4:00 sáng)."
+                                )
+                        )
+                    }
+                }
+                Result.success(
+                    data.copy(
+                        word = data.word.trim().ifEmpty { cleanWord }.take(Card.MAX_WORD_LENGTH),
+                        phonetic = data.phonetic.trim().take(Card.MAX_PHONETIC_LENGTH),
+                        meaning = data.meaning.trim().take(Card.MAX_MEANING_LENGTH),
+                        example = data.example.trim().take(Card.MAX_EXAMPLE_LENGTH)
+                    )
+                )
+            },
+            onFailure = { error ->
+                Result.failure(error)
+            }
+        )
+    }
 
     private fun validateCardFields(
         word: String,
