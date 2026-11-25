@@ -204,7 +204,13 @@ class RoomStudySessionRepository(
         restoredCard ?: throw IllegalStateException("Không thể hoàn tác lượt đánh giá.")
     }
 
-    override fun getButtonPreviewLabels(card: Card): Map<ReviewQuality, String> = emptyMap()
+    override fun getButtonPreviewLabels(card: Card): Map<ReviewQuality, String> {
+        return Sm2Engine.previewButtonIntervals(
+            card = card,
+            currentLearningDay = learningDayProvider(),
+            nowMillis = timeProvider()
+        )
+    }
 
     override suspend fun getTomorrowDueCount(deckId: String?): Int {
         val ownerId = ownerIdProvider()
