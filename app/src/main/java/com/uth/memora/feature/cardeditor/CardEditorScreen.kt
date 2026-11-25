@@ -63,6 +63,7 @@ import com.uth.memora.core.model.Card
 import com.uth.memora.core.model.Deck
 import com.uth.memora.core.model.PartOfSpeech
 import com.uth.memora.feature.cardeditor.components.AutoFillButton
+import com.uth.memora.feature.common.ConfirmDialog
 import com.uth.memora.feature.common.shimmer.shimmerEffect
 import com.uth.memora.feature.theme.MemoraTheme
 
@@ -87,12 +88,27 @@ fun CardEditorScreen(
     onAutoFillClick: () -> Unit = {},
     onPickImageClick: () -> Unit = {},
     onRemoveImageClick: () -> Unit = {},
+    onConfirmSaveDuplicateWord: () -> Unit = {},
+    onDismissDuplicateWordDialog: () -> Unit = {},
     deckSelectorContent: (@Composable () -> Unit)? = null,
     autoFillButtonContent: (@Composable () -> Unit)? = null,
     partOfSpeechPickerContent: (@Composable () -> Unit)? = null,
     imagePickerContent: (@Composable () -> Unit)? = null
 ) {
     val isFormEditable = !uiState.isSaving && !uiState.isAutoFilling
+
+    if (uiState.isDuplicateWordDialogVisible) {
+        val deckName = uiState.selectedDeckOption?.deck?.name ?: "bộ từ này"
+        ConfirmDialog(
+            title = "Từ vựng đã tồn tại trong bộ",
+            message = "Từ \"${uiState.duplicateWordCandidate}\" đã có trong bộ \"$deckName\". Bạn có muốn vẫn lưu thêm thẻ trùng này không?",
+            confirmText = "Vẫn lưu thẻ",
+            dismissText = "Hủy & Sửa lại",
+            isDestructive = false,
+            onConfirm = onConfirmSaveDuplicateWord,
+            onDismiss = onDismissDuplicateWordDialog
+        )
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),

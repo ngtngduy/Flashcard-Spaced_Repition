@@ -95,6 +95,8 @@ fun CardEditorRoute(
         },
         onRemoveImageClick = viewModel::onRemoveImage,
         onToggleContinuousAddMode = viewModel::onToggleContinuousAddMode,
+        onConfirmSaveDuplicateWord = viewModel::confirmSaveDuplicateWord,
+        onDismissDuplicateWordDialog = viewModel::dismissDuplicateWordDialog,
         onSaveClick = { viewModel.saveCard(closeAfterSave = false) },
         onBack = onBack,
         modifier = modifier
