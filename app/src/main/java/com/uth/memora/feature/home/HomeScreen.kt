@@ -59,6 +59,7 @@ import com.uth.memora.feature.common.MemoraLinearProgressBar
 import com.uth.memora.feature.common.shimmer.shimmerEffect
 import com.uth.memora.feature.theme.MemoraTheme
 import com.uth.memora.feature.theme.StatusWarning
+import com.uth.memora.feature.theme.StatusWarningLight
 import com.uth.memora.feature.theme.SurfaceLight
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -424,7 +425,7 @@ fun HomeStatsRow(
         HomeStatCard(
             title = "Chuỗi ngày học",
             icon = Icons.Default.LocalFireDepartment,
-            iconTint = StatusWarning,
+            iconTint = if (isLight) StatusWarningLight else StatusWarning,
             modifier = Modifier
                 .weight(1.15f)
                 .widthIn(min = 100.dp)
