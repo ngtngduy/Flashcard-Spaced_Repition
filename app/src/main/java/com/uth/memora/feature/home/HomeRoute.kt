@@ -40,6 +40,7 @@ fun HomeRoute(
         onNavigateToDeckDetail = onNavigateToDeckDetail,
         onNavigateToAddCard = onNavigateToAddCard,
         onRefreshSync = viewModel::triggerImmediateSync,
+        onRetryLoad = viewModel::observeHomeData,
         modifier = modifier
     )
 }

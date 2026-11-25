@@ -1,9 +1,16 @@
 package com.uth.memora.feature.navigation
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
@@ -29,10 +36,19 @@ import com.uth.memora.feature.study.StudyRoute
 @Composable
 fun MemoraApp(
     navController: NavHostController = rememberNavController(),
-    startDestination: String = MemoraRoutes.HOME
+    startDestination: String = MemoraRoutes.HOME,
+    openStudyFromNotification: Boolean = false
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+
+    LaunchedEffect(openStudyFromNotification) {
+        if (openStudyFromNotification && startDestination == MemoraRoutes.HOME) {
+            navController.navigate(MemoraRoutes.study("all", StudyMode.DUE_REVIEW)) {
+                launchSingleTop = true
+            }
+        }
+    }
 
     // Bảo đảm Bottom Bar chỉ hiện ở đúng 5 tab chính; ẩn ở Onboarding, DeckDetail, CardEditor, Study, Intermission, Auth (Mục 6)
     val isBottomBarVisible = currentRoute != null && topLevelTabs.any { it.route == currentRoute }
@@ -61,7 +77,28 @@ fun MemoraApp(
         NavHost(
             navController = navController,
             startDestination = startDestination,
-            modifier = Modifier.padding(innerPadding)
+            modifier = Modifier.padding(innerPadding),
+            enterTransition = {
+                slideInHorizontally(
+                    animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
+                    initialOffsetX = { fullWidth -> fullWidth / 6 }
+                ) + fadeIn(animationSpec = tween(durationMillis = 250))
+            },
+            exitTransition = {
+                fadeOut(animationSpec = tween(durationMillis = 200))
+            },
+            popEnterTransition = {
+                slideInHorizontally(
+                    animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
+                    initialOffsetX = { fullWidth -> -fullWidth / 6 }
+                ) + fadeIn(animationSpec = tween(durationMillis = 250))
+            },
+            popExitTransition = {
+                slideOutHorizontally(
+                    animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
+                    targetOffsetX = { fullWidth -> fullWidth / 6 }
+                ) + fadeOut(animationSpec = tween(durationMillis = 200))
+            }
         ) {
             // Khởi động
             composable(MemoraRoutes.ONBOARDING) {
@@ -172,7 +209,16 @@ fun MemoraApp(
                     studyMode = studyMode,
                     onIntermission = { navController.navigate(MemoraRoutes.intermission(deckId)) },
                     onFinishSession = { navController.popBackStack() },
-                    onBack = { navController.popBackStack() }
+                    onBack = { navController.popBackStack() },
+                    onNavigateToPractice = {
+                        navController.navigate(MemoraRoutes.PRACTICE) {
+                            popUpTo(MemoraRoutes.HOME) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
                 )
             }
 

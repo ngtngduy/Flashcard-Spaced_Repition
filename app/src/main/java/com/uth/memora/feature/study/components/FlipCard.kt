@@ -17,6 +17,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.uth.memora.feature.theme.MemoraTheme
@@ -47,6 +49,13 @@ fun FlipCard(
         onClick = onFlip,
         modifier = modifier
             .fillMaxWidth()
+            .semantics {
+                contentDescription = if (isFlipped) {
+                    "Mặt sau thẻ từ vựng, chạm để lật lại mặt trước"
+                } else {
+                    "Mặt trước thẻ từ vựng, chạm để lật xem nghĩa tiếng Việt"
+                }
+            }
             .graphicsLayer {
                 rotationY = rotation
                 cameraDistance = 12f * density

@@ -706,7 +706,7 @@ fun UserDeckItemCard(
                                 leadingIcon = {
                                     Icon(
                                         imageVector = Icons.Default.Edit,
-                                        contentDescription = null
+                                        contentDescription = "Chỉnh sửa bộ từ"
                                     )
                                 },
                                 onClick = {
@@ -724,7 +724,7 @@ fun UserDeckItemCard(
                                 leadingIcon = {
                                     Icon(
                                         imageVector = Icons.Default.DeleteOutline,
-                                        contentDescription = null,
+                                        contentDescription = "Xóa bộ từ",
                                         tint = MaterialTheme.colorScheme.error
                                     )
                                 },
