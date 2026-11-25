@@ -209,7 +209,7 @@ fun DeckDetailScreen(
                             leadingIcon = {
                                 Icon(
                                     imageVector = Icons.Default.Add,
-                                    contentDescription = null
+                                    contentDescription = "Thêm thẻ mới vào bộ"
                                 )
                             },
                             onClick = {
@@ -223,7 +223,7 @@ fun DeckDetailScreen(
                             leadingIcon = {
                                 Icon(
                                     imageVector = Icons.Default.RestartAlt,
-                                    contentDescription = null
+                                    contentDescription = "Đặt lại toàn bộ tiến độ bộ từ"
                                 )
                             },
                             onClick = {

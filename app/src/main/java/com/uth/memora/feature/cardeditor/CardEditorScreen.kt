@@ -974,7 +974,7 @@ fun CardEditorImagePickerSection(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Image,
-                        contentDescription = null,
+                        contentDescription = "Chọn ảnh minh họa thẻ từ thiết bị",
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(24.dp)
                     )
@@ -1062,7 +1062,7 @@ fun CardEditorImagePickerSection(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Image,
-                                contentDescription = null,
+                                contentDescription = "Đổi ảnh minh họa khác",
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
@@ -1078,7 +1078,7 @@ fun CardEditorImagePickerSection(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.DeleteOutline,
-                                contentDescription = null,
+                                contentDescription = "Xóa ảnh minh họa đang chọn",
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))

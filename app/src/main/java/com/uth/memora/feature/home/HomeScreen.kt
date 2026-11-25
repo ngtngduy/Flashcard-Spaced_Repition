@@ -47,6 +47,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -240,6 +242,9 @@ fun HomeStudyCtaCard(
             .fillMaxWidth()
             .heightIn(min = 172.dp)
             .clip(RoundedCornerShape(10.dp))
+            .semantics {
+                contentDescription = "$title, chạm để bắt đầu phiên học"
+            }
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surface,
@@ -498,7 +503,7 @@ private fun HomeStatCard(
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = icon,
-                            contentDescription = null,
+                            contentDescription = title,
                             tint = iconTint,
                             modifier = Modifier.size(13.dp)
                         )
