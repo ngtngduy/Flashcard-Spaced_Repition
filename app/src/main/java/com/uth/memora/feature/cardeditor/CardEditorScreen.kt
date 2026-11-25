@@ -22,7 +22,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Lightbulb
@@ -49,10 +52,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import coil.compose.SubcomposeAsyncImage
 import com.uth.memora.core.model.Card
 import com.uth.memora.core.model.Deck
 import com.uth.memora.core.model.PartOfSpeech
@@ -79,6 +85,8 @@ fun CardEditorScreen(
     onSelectDeck: (String) -> Unit = {},
     onPartOfSpeechChange: (PartOfSpeech?) -> Unit = {},
     onAutoFillClick: () -> Unit = {},
+    onPickImageClick: () -> Unit = {},
+    onRemoveImageClick: () -> Unit = {},
     deckSelectorContent: (@Composable () -> Unit)? = null,
     autoFillButtonContent: (@Composable () -> Unit)? = null,
     partOfSpeechPickerContent: (@Composable () -> Unit)? = null,
@@ -381,9 +389,17 @@ fun CardEditorScreen(
                     }
                 }
 
-                // Khe cắm chọn ảnh minh họa (G7)
+                // Trường 5: Ảnh minh họa thẻ với Photo Picker & SubcomposeAsyncImage + Shimmer (Figma 2197:17..2197:23 & Mục 6.3)
                 if (imagePickerContent != null) {
                     imagePickerContent()
+                } else {
+                    CardEditorImagePickerSection(
+                        imagePathOrUri = uiState.localImagePath,
+                        imageError = uiState.imageError,
+                        enabled = isFormEditable,
+                        onPickImageClick = onPickImageClick,
+                        onRemoveImageClick = onRemoveImageClick
+                    )
                 }
 
                 // Chế độ thêm liên tục (chỉ hiển thị khi thêm thẻ mới)
@@ -858,6 +874,180 @@ private fun PhoneticFieldSection(
                     )
                 },
                 colors = cardEditorTextFieldColors()
+            )
+        }
+    }
+}
+
+/**
+ * Khu vực chọn và xem trước Ảnh minh họa thẻ (Figma 2197:17..2197:23, Mục 6.3 & 11):
+ * - Mở Android Photo Picker (1 ảnh JPG / PNG / WebP · tối đa 500KB)
+ * - Xem trước ảnh bằng Coil [SubcomposeAsyncImage] kèm hiệu ứng [shimmerEffect] bo góc 12.dp
+ */
+@Composable
+fun CardEditorImagePickerSection(
+    imagePathOrUri: String?,
+    imageError: String?,
+    enabled: Boolean,
+    onPickImageClick: () -> Unit,
+    onRemoveImageClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        CardEditorFieldHeader(
+            label = "Ảnh minh họa thẻ",
+            requirement = "Không bắt buộc"
+        )
+
+        if (imagePathOrUri.isNullOrBlank()) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable(enabled = enabled, onClick = onPickImageClick),
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = if (imageError != null) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    }
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Image,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Text(
+                        text = "Chọn ảnh",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = "1 ảnh JPG / PNG / WebP · Tối đa 500KB",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        } else {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    SubcomposeAsyncImage(
+                        model = imagePathOrUri,
+                        contentDescription = "Ảnh minh họa thẻ đã chọn",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(160.dp)
+                            .clip(RoundedCornerShape(12.dp)),
+                        loading = {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .shimmerEffect()
+                            )
+                        },
+                        error = {
+                            Surface(
+                                modifier = Modifier.fillMaxSize(),
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.BrokenImage,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Không tải được bản xem trước ảnh",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(
+                            onClick = onPickImageClick,
+                            enabled = enabled
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Image,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Đổi ảnh khác")
+                        }
+
+                        TextButton(
+                            onClick = onRemoveImageClick,
+                            enabled = enabled,
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DeleteOutline,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Xóa ảnh")
+                        }
+                    }
+                }
+            }
+        }
+
+        if (imageError != null) {
+            Text(
+                text = imageError,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error
             )
         }
     }
