@@ -23,6 +23,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val userPreferencesRepository = (application as MemoraApplication).container.userPreferencesRepository
+        val openStudyFromNotification = rememberOpenStudyFromIntent()
 
         setContent {
             // Quan sát cài đặt người dùng từ DataStore / FakeRepository (Mục 11 & 13)
@@ -54,9 +55,19 @@ class MainActivity : ComponentActivity() {
                             MemoraRoutes.ONBOARDING
                         }
                     }
-                    MemoraApp(startDestination = initialDestination)
+                    MemoraApp(
+                        startDestination = initialDestination,
+                        openStudyFromNotification = openStudyFromNotification
+                    )
                 }
             }
         }
+    }
+
+    private fun rememberOpenStudyFromIntent(): Boolean {
+        val currentIntent = intent ?: return false
+        return currentIntent.getBooleanExtra("EXTRA_OPEN_STUDY_REMINDER", false) ||
+            currentIntent.getBooleanExtra("open_study", false) ||
+            currentIntent.getStringExtra("destination").equals("study", ignoreCase = true)
     }
 }
