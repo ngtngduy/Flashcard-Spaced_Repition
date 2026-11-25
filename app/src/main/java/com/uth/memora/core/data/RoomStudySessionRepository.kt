@@ -80,7 +80,30 @@ class RoomStudySessionRepository(
         updatedCard
     }
 
-    override suspend fun getDueReviewQueue(deckId: String?): List<Card> = emptyList()
+    override suspend fun getDueReviewQueue(deckId: String?): List<Card> {
+        val ownerId = ownerIdProvider()
+        val nowMillis = timeProvider()
+        val todayLearningDay = learningDayProvider()
+        val normalizedDeckId = normalizeDeckId(deckId)
+
+        val dueLearningCards = cardDao.getDueLearningCards(
+            ownerId = ownerId,
+            deckId = normalizedDeckId,
+            nowMillis = nowMillis
+        ).map { it.toDomain() }
+
+        val dueReviewCards = cardDao.getDueReviewCards(
+            ownerId = ownerId,
+            deckId = normalizedDeckId,
+            currentLearningDay = todayLearningDay
+        ).map { it.toDomain() }
+            .groupBy { it.dueDay ?: Long.MAX_VALUE }
+            .toSortedMap()
+            .values
+            .flatMap { sameDayCards -> sameDayCards.shuffled() }
+
+        return dueLearningCards + dueReviewCards
+    }
 
     override suspend fun submitCardReview(
         cardId: String,
@@ -93,7 +116,16 @@ class RoomStudySessionRepository(
 
     override fun getButtonPreviewLabels(card: Card): Map<ReviewQuality, String> = emptyMap()
 
-    override suspend fun getTomorrowDueCount(deckId: String?): Int = 0
+    override suspend fun getTomorrowDueCount(deckId: String?): Int {
+        val ownerId = ownerIdProvider()
+        val tomorrowDay = learningDayProvider() + 1L
+        val normalizedDeckId = normalizeDeckId(deckId)
+        return cardDao.countTomorrowDueCards(
+            ownerId = ownerId,
+            deckId = normalizedDeckId,
+            tomorrowDay = tomorrowDay
+        )
+    }
 
     private fun normalizeDeckId(deckId: String?): String? {
         val clean = deckId?.trim()
