@@ -14,16 +14,26 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.BrightnessAuto
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +57,12 @@ fun SettingsScreen(
     uiState: SettingsUiState,
     onSelectThemeMode: (ThemeMode) -> Unit = {},
     onDailyNewCardsLimitChange: (Int) -> Unit = {},
+    onToggleReminder: (Boolean) -> Unit = {},
+    onOpenTimePicker: () -> Unit = {},
+    onDismissTimePicker: () -> Unit = {},
+    onConfirmReminderTime: (Int, Int) -> Unit = { _, _ -> },
+    onOpenSystemNotificationSettings: () -> Unit = {},
+    onToggleSound: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -121,8 +137,263 @@ fun SettingsScreen(
                     onDailyLimitChange = onDailyNewCardsLimitChange
                 )
             }
+
+            item(key = "settings_reminder_sound_section") {
+                ReminderAndSoundSection(
+                    isReminderEnabled = uiState.isReminderEnabled,
+                    formattedReminderTime = uiState.formattedReminderTime,
+                    isNotificationPermissionGuideVisible = uiState.isNotificationPermissionGuideVisible,
+                    isSoundEnabled = uiState.isSoundEnabled,
+                    onToggleReminder = onToggleReminder,
+                    onOpenTimePicker = onOpenTimePicker,
+                    onOpenSystemNotificationSettings = onOpenSystemNotificationSettings,
+                    onToggleSound = onToggleSound
+                )
+            }
+        }
+
+        if (uiState.isTimePickerVisible) {
+            ReminderTimePickerDialog(
+                initialHour = uiState.reminderHour,
+                initialMinute = uiState.reminderMinute,
+                onDismiss = onDismissTimePicker,
+                onConfirm = onConfirmReminderTime
+            )
         }
     }
+}
+
+/**
+ * Khối Nhắc nhở học tập hằng ngày (kèm hướng dẫn cấp quyền thông báo Android 13+)
+ * và công tắc Hiệu ứng âm thanh & phát âm (Figma Node 13:2 · Mục 6.10 & 13).
+ */
+@Composable
+fun ReminderAndSoundSection(
+    isReminderEnabled: Boolean,
+    formattedReminderTime: String,
+    isNotificationPermissionGuideVisible: Boolean,
+    isSoundEnabled: Boolean,
+    onToggleReminder: (Boolean) -> Unit,
+    onOpenTimePicker: () -> Unit,
+    onOpenSystemNotificationSettings: () -> Unit,
+    onToggleSound: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text(
+                text = "NHẮC HỌC & ÂM THANH",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = KickerBlue
+            )
+
+            // 1. Công tắc Nhắc nhở học tập
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.NotificationsActive,
+                        contentDescription = "Nhắc nhở học tập",
+                        tint = PrimaryBlue,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "Nhắc nhở học tập hằng ngày",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Chỉ gửi thông báo khi bạn còn thẻ đến hạn ôn trong ngày",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Switch(
+                    checked = isReminderEnabled,
+                    onCheckedChange = onToggleReminder
+                )
+            }
+
+            // 2. Chọn khung giờ nhắc học
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(enabled = isReminderEnabled, onClick = onOpenTimePicker),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(
+                    alpha = if (isReminderEnabled) 0.7f else 0.35f
+                )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AccessTime,
+                            contentDescription = "Giờ nhắc học",
+                            tint = if (isReminderEnabled) PrimaryBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Giờ nhắc học cố định",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (isReminderEnabled) {
+                                MaterialTheme.colorScheme.onSurface
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
+
+                    Text(
+                        text = formattedReminderTime,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = if (isReminderEnabled) PrimaryBlue else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Hướng dẫn mở lại quyền thông báo trên Android 13+ khi bị từ chối (Mục 6.10)
+            if (isNotificationPermissionGuideVisible) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.errorContainer
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Quyền thông báo (POST_NOTIFICATIONS) đang bị từ chối trên thiết bị. Vui lòng bật lại quyền Thông báo cho Memora trong Cài đặt hệ thống để nhận lời nhắc ôn tập.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        TextButton(onClick = onOpenSystemNotificationSettings) {
+                            Text(
+                                text = "Mở Cài đặt thông báo của máy",
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+
+            // 3. Công tắc Hiệu ứng âm thanh & phát âm
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.VolumeUp,
+                        contentDescription = "Hiệu ứng âm thanh và phát âm",
+                        tint = PrimaryBlue,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "Hiệu ứng âm thanh & phát âm",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Bật đọc phát âm tiếng Anh (TTS) và âm phản hồi khi lật thẻ",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Switch(
+                    checked = isSoundEnabled,
+                    onCheckedChange = onToggleSound
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReminderTimePickerDialog(
+    initialHour: Int,
+    initialMinute: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (Int, Int) -> Unit
+) {
+    val timePickerState = rememberTimePickerState(
+        initialHour = initialHour.coerceIn(0, 23),
+        initialMinute = initialMinute.coerceIn(0, 59),
+        is24Hour = true
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Chọn giờ nhắc học hằng ngày",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                TimePicker(state = timePickerState)
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(timePickerState.hour, timePickerState.minute) }
+            ) {
+                Text("Lưu giờ nhắc")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Hủy")
+            }
+        }
+    )
 }
 
 /**
