@@ -451,9 +451,11 @@ class PracticeViewModel(
     }
 
     /**
-     * Bấm "Chấm lại" cho một câu đang ở trạng thái `GRADE_ERROR` (Figma 2212:107 · Mục 8.2 & 9.5).
+     * Bấm "Chấm lại" cho một câu đang ở trạng thái `GRADE_ERROR` (Figma 2212:107 · Mục 8.2 & 9.5):
+     * Gọi `practiceSentenceRepository.retryFailedSentence(sentenceId)` và đưa vào `GradingScheduler`
+     * nếu câu ở trạng thái chờ/cần xử lý nền.
      */
-    fun retrySentence(sentenceId: String, isOnline: Boolean = isOnlineProvider()) {
+    fun retryFailedSentence(sentenceId: String, isOnline: Boolean = isOnlineProvider()) {
         val state = _uiState.value
         if (sentenceId.isBlank() || state.retryingSentenceId != null || state.isSubmitting) return
 
@@ -543,7 +545,7 @@ class PracticeViewModel(
                             _uiState.update {
                                 it.copy(
                                     retryingSentenceId = null,
-                                    feedbackMessage = MESSAGE_SAVED_OFFLINE_VI
+                                    feedbackMessage = MESSAGE_RETRY_QUEUED_VI
                                 )
                             }
                         }
@@ -560,20 +562,46 @@ class PracticeViewModel(
                         }
 
                         SentenceStatus.GRADING -> {
+                            enqueueWithSchedulerSafely(updatedSentence.id, replaceExisting = true)
                             _uiState.update { it.copy(retryingSentenceId = null) }
                         }
                     }
                 },
                 onFailure = { error ->
-                    _uiState.update {
-                        it.copy(
-                            retryingSentenceId = null,
-                            errorMessage = mapErrorToVietnamese(error)
-                        )
+                    if (isTransientNetworkOrTimeout(error)) {
+                        runCatching {
+                            practiceSentenceRepository.saveAiGradingResult(
+                                sentenceId = sentenceId,
+                                status = SentenceStatus.PENDING_GRADE,
+                                errorMessage = null,
+                                retryCount = 0
+                            )
+                        }
+                        enqueueWithSchedulerSafely(sentenceId, replaceExisting = true)
+                        _uiState.update {
+                            it.copy(
+                                retryingSentenceId = null,
+                                feedbackMessage = MESSAGE_SAVED_OFFLINE_VI
+                            )
+                        }
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                retryingSentenceId = null,
+                                errorMessage = mapErrorToVietnamese(error)
+                            )
+                        }
                     }
                 }
             )
         }
+    }
+
+    /**
+     * Alias tương thích chuyển sang [retryFailedSentence] (Mục 8.2).
+     */
+    fun retrySentence(sentenceId: String, isOnline: Boolean = isOnlineProvider()) {
+        retryFailedSentence(sentenceId = sentenceId, isOnline = isOnline)
     }
 
     /**
@@ -830,6 +858,8 @@ class PracticeViewModel(
             "Chức năng Luyện đặt câu với AI yêu cầu đăng nhập tài khoản để sử dụng."
         const val MESSAGE_SAVED_OFFLINE_VI: String =
             "Không có kết nối mạng. Câu đã được lưu Chờ chấm và sẽ tự động gửi khi có mạng."
+        const val MESSAGE_RETRY_QUEUED_VI: String =
+            "Đã đưa câu vào hàng đợi chấm lại với AI."
         const val MESSAGE_DUPLICATE_IN_FLIGHT_VI: String =
             "Câu này đang ở trạng thái Chờ chấm hoặc Đang chấm, vui lòng đợi kết quả."
 

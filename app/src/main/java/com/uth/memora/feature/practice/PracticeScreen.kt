@@ -56,6 +56,7 @@ import com.uth.memora.feature.common.MemoraPrimaryButton
 import com.uth.memora.feature.common.MemoraSectionCard
 import com.uth.memora.feature.common.MemoraStatusBadge
 import com.uth.memora.feature.common.shimmer.AiResultShimmerSkeleton
+import com.uth.memora.feature.practice.components.SentenceHistory
 import com.uth.memora.feature.practice.components.SentenceInput
 import com.uth.memora.feature.practice.components.TargetWordCard
 import com.uth.memora.feature.theme.MemoraTheme
@@ -84,6 +85,8 @@ fun PracticeScreen(
     onSpeakWord: (String) -> Unit = {},
     onInputTextChange: (String) -> Unit = {},
     onSubmitSentence: () -> Unit = {},
+    onSaveCorrectedAsExample: (String) -> Unit = {},
+    onRetryFailedSentence: (String) -> Unit = {},
     onDismissMessage: () -> Unit = {},
     modifier: Modifier = Modifier,
     isOnline: Boolean = true,
@@ -118,6 +121,8 @@ fun PracticeScreen(
                     onSpeakWord = onSpeakWord,
                     onInputTextChange = onInputTextChange,
                     onSubmitSentence = onSubmitSentence,
+                    onSaveCorrectedAsExample = onSaveCorrectedAsExample,
+                    onRetryFailedSentence = onRetryFailedSentence,
                     onDismissMessage = onDismissMessage,
                     voiceActionContent = voiceActionContent,
                     resultSectionContent = resultSectionContent,
@@ -318,6 +323,8 @@ private fun PracticeSignedInContent(
     onSpeakWord: (String) -> Unit,
     onInputTextChange: (String) -> Unit,
     onSubmitSentence: () -> Unit,
+    onSaveCorrectedAsExample: (String) -> Unit,
+    onRetryFailedSentence: (String) -> Unit,
     onDismissMessage: () -> Unit,
     voiceActionContent: (@Composable () -> Unit)?,
     resultSectionContent: (@Composable () -> Unit)?,
@@ -444,7 +451,18 @@ private fun PracticeSignedInContent(
                         resultSectionContent()
                     }
 
-                    !hasActiveOnlineGrading && uiState.history.isEmpty() -> {
+                    uiState.history.isNotEmpty() -> {
+                        SentenceHistory(
+                            history = uiState.history,
+                            onSaveCorrectedAsExample = onSaveCorrectedAsExample,
+                            onRetrySentence = onRetryFailedSentence,
+                            retryingSentenceId = uiState.retryingSentenceId,
+                            savingExampleSentenceId = uiState.savingExampleSentenceId,
+                            savedExampleSentenceIds = uiState.savedExampleSentenceIds
+                        )
+                    }
+
+                    !hasActiveOnlineGrading -> {
                         PracticeEmptyResultCard(targetWord = selectedCard.word)
                     }
                 }

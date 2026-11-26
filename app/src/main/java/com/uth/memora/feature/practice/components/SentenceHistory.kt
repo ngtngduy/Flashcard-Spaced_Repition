@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Refresh
@@ -65,7 +66,7 @@ fun SentenceHistory(
     history: List<PracticeSentence>,
     onSaveCorrectedAsExample: (String) -> Unit,
     modifier: Modifier = Modifier,
-    onRetrySentence: ((String) -> Unit)? = null,
+    onRetrySentence: (String) -> Unit = {},
     retryingSentenceId: String? = null,
     savingExampleSentenceId: String? = null,
     savedExampleSentenceIds: Set<String> = emptySet()
@@ -117,7 +118,7 @@ private fun SentenceHistoryItem(
     sentence: PracticeSentence,
     defaultExpanded: Boolean,
     onSaveCorrectedAsExample: (String) -> Unit,
-    onRetrySentence: ((String) -> Unit)?,
+    onRetrySentence: (String) -> Unit,
     isRetrying: Boolean,
     isSavingExample: Boolean,
     isSavedAsExample: Boolean
@@ -267,53 +268,77 @@ private fun SentenceHistoryItem(
             }
 
             SentenceStatus.GRADE_ERROR -> {
-                Spacer(modifier = Modifier.height(8.dp))
+                // Thông báo lỗi tiếng Việt rõ ràng kèm nút "Chấm lại" (Figma 2212:104..108 · Mục 8.2 & 9.5)
+                Spacer(modifier = Modifier.height(10.dp))
                 val errorText = sentence.errorMessage?.takeIf { it.isNotBlank() }
                     ?: "Chưa thể chấm câu lúc này, bạn bấm Chấm lại nhé."
-                Text(
-                    text = errorText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
 
-                if (onRetrySentence != null) {
-                    Spacer(modifier = Modifier.height(10.dp))
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f))
+                ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Surface(
-                            onClick = { onRetrySentence(sentence.id) },
-                            enabled = !isRetrying,
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.primary,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+                        Icon(
+                            imageVector = Icons.Default.ErrorOutline,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier
+                                .padding(top = 1.dp)
+                                .size(16.dp)
+                        )
+                        Text(
+                            text = errorText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    Surface(
+                        onClick = { onRetrySentence(sentence.id) },
+                        enabled = !isRetrying,
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                if (isRetrying) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(14.dp),
-                                        strokeWidth = 2.dp,
-                                        color = MaterialTheme.colorScheme.onPrimary
-                                    )
-                                } else {
-                                    Icon(
-                                        imageVector = Icons.Default.Refresh,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onPrimary,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                }
-                                Text(
-                                    text = if (isRetrying) "Đang chấm lại..." else "Chấm lại",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            if (isRetrying) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    strokeWidth = 2.dp,
                                     color = MaterialTheme.colorScheme.onPrimary
                                 )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(15.dp)
+                                )
                             }
+                            Text(
+                                text = if (isRetrying) "Đang chấm lại..." else "Chấm lại",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
                         }
                     }
                 }
