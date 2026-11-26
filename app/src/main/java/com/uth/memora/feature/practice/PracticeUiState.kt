@@ -96,9 +96,14 @@ data class PracticeUiState(
                 SentenceLocalValidator.validate(target.word, inputText).isValid
         }
 
-    /** Nút Gửi chỉ sáng khi đã đăng nhập, câu hợp lệ cục bộ, không đang gửi và không trùng câu đang chờ/đang chấm (Mục 6.7, 6.8 & 11). */
+    /** `true` khi đã dùng hết 20 lượt chấm AI trong ngày học hôm nay (Mục 6.7, 9.5 & 11). */
+    val isQuotaExhausted: Boolean
+        get() = remainingDailyQuota <= 0
+
+    /** Nút Gửi chỉ sáng khi đã đăng nhập, còn hạn mức hôm nay, câu hợp lệ cục bộ, không đang gửi và không trùng câu đang chờ/đang chấm (Mục 4, 6.7, 6.8 & 11). */
     val canSubmit: Boolean
         get() = !isGuest &&
+            !isQuotaExhausted &&
             selectedCard != null &&
             isInputValid &&
             !isSubmitting &&
