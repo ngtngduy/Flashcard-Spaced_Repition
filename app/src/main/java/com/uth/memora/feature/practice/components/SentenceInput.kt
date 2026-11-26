@@ -135,7 +135,7 @@ fun SentenceInput(
                 onValueChange = onInputTextChange,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 140.dp),
+                    .heightIn(min = if (voiceActionContent != null) 140.dp else 124.dp),
                 enabled = enabled && !isSubmitting,
                 isError = validationError != null,
                 placeholder = {

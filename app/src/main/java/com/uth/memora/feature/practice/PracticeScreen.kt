@@ -92,6 +92,7 @@ fun PracticeScreen(
     onDismissMessage: () -> Unit = {},
     modifier: Modifier = Modifier,
     isOnline: Boolean = true,
+    isVoiceInputAvailable: Boolean = true,
     speechState: SpeechUiState = SpeechUiState.Idle,
     onStartVoiceInput: () -> Unit = {},
     onStopVoiceInput: () -> Unit = {},
@@ -120,6 +121,7 @@ fun PracticeScreen(
                 PracticeSignedInContent(
                     uiState = uiState,
                     isOnline = isOnline,
+                    isVoiceInputAvailable = isVoiceInputAvailable,
                     speechState = speechState,
                     onSelectTargetCard = onSelectTargetCard,
                     onNextCard = onNextCard,
@@ -325,6 +327,7 @@ private fun GuestFeatureHighlightRow(
 private fun PracticeSignedInContent(
     uiState: PracticeUiState,
     isOnline: Boolean,
+    isVoiceInputAvailable: Boolean,
     speechState: SpeechUiState,
     onSelectTargetCard: (Int) -> Unit,
     onNextCard: () -> Unit,
@@ -433,14 +436,21 @@ private fun PracticeSignedInContent(
                     onNextCard = onNextCard
                 )
 
-                // Khung nhập câu & nút Micro/Gửi: khóa nút gửi khi remainingDailyQuota <= 0 (Mục 6.7, 6.8 & 9.5 · D4, D5 & E4)
-                val effectiveVoiceAction: @Composable () -> Unit = voiceActionContent ?: {
-                    MicButton(
-                        speechState = speechState,
-                        onStartClick = onStartVoiceInput,
-                        onStopClick = onStopVoiceInput,
-                        enabled = !uiState.isSubmitting
-                    )
+                // Khung nhập câu & nút Micro/Gửi: ẩn MicButton duyên dáng nếu thiết bị không hỗ trợ SpeechRecognizer (Mục 6.7, 6.8 & 9.5 · D4, D5, E4 & E5)
+                val effectiveVoiceAction: (@Composable () -> Unit)? = when {
+                    voiceActionContent != null -> voiceActionContent
+                    isVoiceInputAvailable -> {
+                        {
+                            MicButton(
+                                speechState = speechState,
+                                onStartClick = onStartVoiceInput,
+                                onStopClick = onStopVoiceInput,
+                                enabled = !uiState.isSubmitting
+                            )
+                        }
+                    }
+
+                    else -> null
                 }
                 SentenceInput(
                     targetWord = selectedCard.word,
@@ -451,7 +461,7 @@ private fun PracticeSignedInContent(
                     onInputTextChange = onInputTextChange,
                     onSubmit = onSubmitSentence,
                     isDuplicateInFlight = uiState.isDuplicateInFlight,
-                    speechState = speechState,
+                    speechState = if (isVoiceInputAvailable) speechState else SpeechUiState.Idle,
                     isLowConfidenceVoiceInput = uiState.isLowConfidenceVoiceInput,
                     voiceActionContent = effectiveVoiceAction
                 )

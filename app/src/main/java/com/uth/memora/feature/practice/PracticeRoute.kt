@@ -15,6 +15,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.uth.memora.integration.speech.SpeechToTextController
@@ -52,8 +54,9 @@ fun PracticeRoute(
     val isOnline by rememberIsNetworkAvailable(appContext)
     val speakWord = rememberPracticeWordSpeaker(appContext)
 
-    // Tích hợp SpeechToTextController và giải phóng khi rời màn để tránh memory leak (Mục 6.7)
+    // Tích hợp SpeechToTextController, kiểm tra hỗ trợ thiết bị và giải phóng khi rời màn (Mục 6.7 & 9.5)
     val speechController = remember(appContext) { SpeechToTextController(appContext) }
+    val isVoiceInputAvailable by speechController.isAvailable.collectAsStateWithLifecycle()
     val speechState by speechController.state.collectAsStateWithLifecycle()
     DisposableEffect(speechController) {
         onDispose {
@@ -61,9 +64,18 @@ fun PracticeRoute(
         }
     }
 
+    // Kiểm tra lại khả năng nhận diện giọng nói khi quay về màn hình (Mục 6.7)
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        speechController.refreshAvailability()
+    }
+
     // Quản lý quyền RECORD_AUDIO và tự bắt đầu ghi âm ngay khi được cấp quyền (Mục 6.7 & 9.5)
     val micPermission = rememberMicPermissionState(
-        onPermissionGranted = { speechController.startListening() }
+        onPermissionGranted = {
+            if (isVoiceInputAvailable) {
+                speechController.startListening()
+            }
+        }
     )
 
     // Nhận kết quả Speech-to-Text, tự chuẩn hóa chữ hoa/dấu câu và gắn nhắc nhẹ nếu lowConfidence == true (Mục 6.7 & 6.8)
@@ -118,17 +130,22 @@ fun PracticeRoute(
         },
         onDismissMessage = viewModel::clearMessages,
         isOnline = isOnline,
-        speechState = speechState,
+        isVoiceInputAvailable = isVoiceInputAvailable,
+        speechState = if (isVoiceInputAvailable) speechState else SpeechUiState.Idle,
         onStartVoiceInput = {
-            viewModel.clearVoiceLowConfidenceHint()
-            micPermission.requestPermission()
+            if (isVoiceInputAvailable) {
+                viewModel.clearVoiceLowConfidenceHint()
+                micPermission.requestPermission()
+            }
         },
         onStopVoiceInput = speechController::stopListening,
         modifier = modifier
     )
 
     // Hộp thoại tiếng Việt giải thích quyền Micro và điều hướng Cài đặt ứng dụng khi bị từ chối (Mục 6.7 & 9.5)
-    MicPermissionDeniedDialog(state = micPermission)
+    if (isVoiceInputAvailable) {
+        MicPermissionDeniedDialog(state = micPermission)
+    }
 }
 
 /**
