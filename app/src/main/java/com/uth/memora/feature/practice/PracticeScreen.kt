@@ -49,6 +49,7 @@ import com.uth.memora.core.model.Card
 import com.uth.memora.core.model.CardState
 import com.uth.memora.core.model.PartOfSpeech
 import com.uth.memora.core.model.PracticeSentence
+import com.uth.memora.core.model.SentenceStatus
 import com.uth.memora.feature.common.EmptyState
 import com.uth.memora.feature.common.MemoraLinearProgressBar
 import com.uth.memora.feature.common.MemoraPrimaryButton
@@ -64,6 +65,8 @@ import com.uth.memora.feature.theme.SurfaceLight
 
 private const val QUOTA_EXHAUSTED_NOTICE_VI =
     "Bạn đã dùng hết 20 lượt chấm AI hôm nay (tự hồi lúc 4:00 sáng)"
+private const val AI_GRADING_LOADING_LABEL_VI =
+    "AI đang phân tích ngữ pháp của bạn..."
 
 /**
  * Màn hình Luyện đặt câu với Chatbot AI (Stateless - Figma 2061:119 & 2212:109 · Mục 4, 6.7, 6.8, 8.2 & 9.5):
@@ -83,6 +86,7 @@ fun PracticeScreen(
     onSubmitSentence: () -> Unit = {},
     onDismissMessage: () -> Unit = {},
     modifier: Modifier = Modifier,
+    isOnline: Boolean = true,
     voiceActionContent: (@Composable () -> Unit)? = null,
     resultSectionContent: (@Composable () -> Unit)? = null
 ) {
@@ -107,6 +111,7 @@ fun PracticeScreen(
             } else {
                 PracticeSignedInContent(
                     uiState = uiState,
+                    isOnline = isOnline,
                     onSelectTargetCard = onSelectTargetCard,
                     onNextCard = onNextCard,
                     onRefreshTargetCards = onRefreshTargetCards,
@@ -306,6 +311,7 @@ private fun GuestFeatureHighlightRow(
 @Composable
 private fun PracticeSignedInContent(
     uiState: PracticeUiState,
+    isOnline: Boolean,
     onSelectTargetCard: (Int) -> Unit,
     onNextCard: () -> Unit,
     onRefreshTargetCards: () -> Unit,
@@ -422,20 +428,133 @@ private fun PracticeSignedInContent(
                     voiceActionContent = voiceActionContent
                 )
 
-                // Khu vực kết quả chấm AI hoặc hiệu ứng Shimmer Loading (Figma 2212:109 · Mục 6.7 & 8.2)
-                if (resultSectionContent != null) {
-                    resultSectionContent()
-                } else if (uiState.isGradingShimmerVisible) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AiResultShimmerSkeleton()
-                        Text(
-                            text = "Tôi đang phân tích ngữ pháp và gợi ý câu chỉnh sửa...",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                // Hiển thị Shimmer Loading khi history có câu GRADING (hoặc PENDING_GRADE khi vừa gửi lúc online)
+                // thay cho thẻ kết quả rỗng (Figma 2212:109 & 2212:145 · Mục 6.7 & 8.2)
+                val hasActiveOnlineGrading = uiState.history.any { sentence ->
+                    sentence.status == SentenceStatus.GRADING ||
+                        (isOnline && sentence.status == SentenceStatus.PENDING_GRADE)
+                } || (isOnline && uiState.isSubmitting)
+
+                if (hasActiveOnlineGrading) {
+                    PracticeGradingShimmerCard()
+                }
+
+                when {
+                    resultSectionContent != null -> {
+                        resultSectionContent()
+                    }
+
+                    !hasActiveOnlineGrading && uiState.history.isEmpty() -> {
+                        PracticeEmptyResultCard(targetWord = selectedCard.word)
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Khung Shimmer Loading mô phỏng kết quả chấm điểm AI trong lúc chờ phản hồi (Figma 2212:145 · Mục 6.7 & 8.2).
+ * Tái sử dụng [AiResultShimmerSkeleton] từ `feature/common/shimmer/`.
+ */
+@Composable
+private fun PracticeGradingShimmerCard(
+    modifier: Modifier = Modifier
+) {
+    MemoraSectionCard(
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(16.dp),
+        containerColor = MaterialTheme.colorScheme.surface,
+        borderColor = MaterialTheme.colorScheme.outlineVariant
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Đánh giá chatbot",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.primary
+            )
+            MemoraStatusBadge(
+                text = SentenceStatus.GRADING.labelVi,
+                accentColor = MaterialTheme.colorScheme.primary
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        AiResultShimmerSkeleton()
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Text(
+            text = AI_GRADING_LOADING_LABEL_VI,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/**
+ * Thẻ kết quả rỗng hiển thị khi thẻ mục tiêu hiện tại chưa có lượt chấm AI nào (Mục 6.7).
+ */
+@Composable
+private fun PracticeEmptyResultCard(
+    targetWord: String,
+    modifier: Modifier = Modifier
+) {
+    MemoraSectionCard(
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(16.dp),
+        containerColor = MaterialTheme.colorScheme.surface,
+        borderColor = MaterialTheme.colorScheme.outlineVariant
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Đánh giá chatbot",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = "Chưa có kết quả",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Surface(
+                modifier = Modifier.size(40.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+            Text(
+                text = "Đặt một câu tiếng Anh có chứa từ \"$targetWord\" rồi bấm \"Chấm điểm câu\" để nhận điểm số, trình độ CEFR và câu chỉnh sửa từ AI.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
@@ -642,6 +761,44 @@ private fun PracticeScreenSignedInDarkPreview() {
                 inputText = "The movie is a narrative about a young artist.",
                 remainingDailyQuota = 16
             ),
+            onNavigateToAuth = {}
+        )
+    }
+}
+
+@Preview(name = "PracticeScreen - Đang chấm Shimmer (Figma 2212:109)", showBackground = true)
+@Composable
+private fun PracticeScreenGradingShimmerDarkPreview() {
+    val sampleCard = Card(
+        id = "card_1",
+        deckId = "deck_everyday",
+        word = "Narrative",
+        phonetic = "/ˈnær.ə.tɪv/",
+        partOfSpeech = PartOfSpeech.NOUN,
+        meaning = "câu chuyện, lời kể, một dạng văn hoặc phim kể về một sự việc.",
+        state = CardState.LEARNING
+    )
+    MemoraTheme(darkTheme = true) {
+        PracticeScreen(
+            uiState = PracticeUiState(
+                isGuest = false,
+                targetCards = listOf(sampleCard),
+                selectedCardIndex = 0,
+                inputText = "The movie is a narrative about a young artist who learn to balance work and family.",
+                remainingDailyQuota = 16,
+                history = listOf(
+                    PracticeSentence(
+                        id = "sentence_grading_1",
+                        cardId = sampleCard.id,
+                        targetWord = sampleCard.word,
+                        sentence = "The movie is a narrative about a young artist who learn to balance work and family.",
+                        status = SentenceStatus.GRADING,
+                        learningDay = 20_000L
+                    )
+                ),
+                isSubmitting = true
+            ),
+            isOnline = true,
             onNavigateToAuth = {}
         )
     }
