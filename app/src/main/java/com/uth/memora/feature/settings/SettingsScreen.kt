@@ -1,26 +1,37 @@
 package com.uth.memora.feature.settings
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.BrightnessAuto
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -47,6 +58,12 @@ import com.uth.memora.core.model.UserPreferences
 import com.uth.memora.feature.theme.KickerBlue
 import com.uth.memora.feature.theme.MemoraTheme
 import com.uth.memora.feature.theme.PrimaryBlue
+import com.uth.memora.feature.theme.StatusError
+import com.uth.memora.feature.theme.StatusSuccess
+import com.uth.memora.feature.theme.StatusWarning
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
@@ -63,6 +80,7 @@ fun SettingsScreen(
     onConfirmReminderTime: (Int, Int) -> Unit = { _, _ -> },
     onOpenSystemNotificationSettings: () -> Unit = {},
     onToggleSound: (Boolean) -> Unit = {},
+    onSyncNowClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -148,6 +166,13 @@ fun SettingsScreen(
                     onOpenTimePicker = onOpenTimePicker,
                     onOpenSystemNotificationSettings = onOpenSystemNotificationSettings,
                     onToggleSound = onToggleSound
+                )
+            }
+
+            item(key = "settings_cloud_sync_section") {
+                CloudSyncStatusSection(
+                    uiState = uiState,
+                    onSyncNowClick = onSyncNowClick
                 )
             }
         }
@@ -394,6 +419,187 @@ private fun ReminderTimePickerDialog(
             }
         }
     )
+}
+
+/**
+ * Khối Trạng thái Đồng bộ đám mây (Figma Node 13:2 · Mục 8.3, 10.1 & 13).
+ *
+ * Hiển thị biểu tượng trạng thái (Đang đồng bộ / Đã đồng bộ / Chờ đồng bộ / Lỗi),
+ * thời gian đồng bộ gần nhất, số thay đổi đang chờ (`pendingChangesCount`), và nút "Đồng bộ ngay".
+ */
+@Composable
+fun CloudSyncStatusSection(
+    uiState: SettingsUiState,
+    onSyncNowClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val badgeState = uiState.syncBadgeState
+    val pendingCount = uiState.syncSummary.pendingChangesCount.coerceAtLeast(0)
+    val lastSyncedText = formatLastSyncedAtVi(uiState.effectiveLastSyncedAtMillis)
+
+    val (statusLabel, statusColor, statusIcon) = when (badgeState) {
+        SyncBadgeStateUi.SYNCING -> Triple("Đang đồng bộ...", PrimaryBlue, Icons.Default.CloudSync)
+        SyncBadgeStateUi.ERROR -> Triple("Lỗi đồng bộ", StatusError, Icons.Default.CloudOff)
+        SyncBadgeStateUi.PENDING -> Triple("Chờ đồng bộ ($pendingCount)", StatusWarning, Icons.Default.CloudUpload)
+        SyncBadgeStateUi.SYNCED -> Triple("Đã đồng bộ", StatusSuccess, Icons.Default.CloudDone)
+    }
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(statusColor.copy(alpha = 0.16f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = statusIcon,
+                            contentDescription = statusLabel,
+                            tint = statusColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "ĐỒNG BỘ ĐÁM MÂY · LWW",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = KickerBlue
+                        )
+                        Text(
+                            text = "Sao lưu & Đồng bộ",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = statusColor.copy(alpha = 0.16f)
+                ) {
+                    Text(
+                        text = statusLabel,
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = statusColor,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
+            }
+
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Đồng bộ gần nhất:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = lastSyncedText,
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Thay đổi đang chờ:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "$pendingCount bản ghi",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = if (pendingCount > 0) StatusWarning else StatusSuccess
+                        )
+                    }
+                }
+            }
+
+            uiState.syncSummary.syncErrorMessage?.takeIf { it.isNotBlank() }?.let { syncErr ->
+                Text(
+                    text = syncErr,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+
+            Button(
+                onClick = onSyncNowClick,
+                enabled = badgeState != SyncBadgeStateUi.SYNCING,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = PrimaryBlue
+                )
+            ) {
+                if (badgeState == SyncBadgeStateUi.SYNCING) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Sync,
+                        contentDescription = "Đồng bộ ngay",
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (badgeState == SyncBadgeStateUi.SYNCING) "Đang đồng bộ..." else "Đồng bộ ngay",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+        }
+    }
+}
+
+private fun formatLastSyncedAtVi(timestampMillis: Long?): String {
+    if (timestampMillis == null || timestampMillis <= 0L) {
+        return "Chưa đồng bộ"
+    }
+    return runCatching {
+        val formatter = SimpleDateFormat("HH:mm · dd/MM/yyyy", Locale.getDefault())
+        formatter.format(Date(timestampMillis))
+    }.getOrDefault("Vừa xong")
 }
 
 /**
