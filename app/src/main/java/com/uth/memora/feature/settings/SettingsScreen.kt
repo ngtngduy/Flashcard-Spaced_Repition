@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.BrightnessAuto
 import androidx.compose.material.icons.filled.CloudDone
@@ -27,11 +28,11 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -58,6 +59,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.uth.memora.BuildConfig
 import com.uth.memora.core.model.ThemeMode
 import com.uth.memora.core.model.UserPreferences
 import com.uth.memora.feature.theme.KickerBlue
@@ -190,6 +192,13 @@ fun SettingsScreen(
                 CloudSyncStatusSection(
                     uiState = uiState,
                     onSyncNowClick = onSyncNowClick
+                )
+            }
+
+            item(key = "settings_about_section") {
+                AboutMemoraSection(
+                    aiAutoFillRemainingToday = uiState.aiAutoFillRemainingToday,
+                    aiSentenceGradingRemainingToday = uiState.aiSentenceGradingRemainingToday
                 )
             }
         }
@@ -541,7 +550,7 @@ fun ReminderAndSoundSection(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.Default.VolumeUp,
+                        imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                         contentDescription = "Hiệu ứng âm thanh và phát âm",
                         tint = PrimaryBlue,
                         modifier = Modifier.size(22.dp)
@@ -793,6 +802,108 @@ private fun formatLastSyncedAtVi(timestampMillis: Long?): String {
         val formatter = SimpleDateFormat("HH:mm · dd/MM/yyyy", Locale.getDefault())
         formatter.format(Date(timestampMillis))
     }.getOrDefault("Vừa xong")
+}
+
+/**
+ * Mục Thông tin ứng dụng Memora ở cuối màn Cài đặt (Figma Node 13:2 & Mục 13).
+ */
+@Composable
+fun AboutMemoraSection(
+    aiAutoFillRemainingToday: Int,
+    aiSentenceGradingRemainingToday: Int,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "Về ứng dụng Memora",
+                        tint = PrimaryBlue,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "THÔNG TIN ỨNG DỤNG",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = KickerBlue
+                        )
+                        Text(
+                            text = "Về ứng dụng Memora",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Text(
+                        text = "v${BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
+            }
+
+            Text(
+                text = "Memora là ứng dụng học từ vựng tiếng Anh thông minh kết hợp thuật toán lặp lại ngắt quãng SM-2 (Spaced Repetition) và trợ lý AI Gemini chấm điểm, phân tích ngữ pháp theo khung CEFR.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Hạn mức AI còn lại hôm nay (làm mới lúc 04:00 sáng):",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "• Gợi ý điền thẻ AI: $aiAutoFillRemainingToday / ${UserPreferences.DEFAULT_AI_AUTO_FILL_LIMIT} lượt • Chấm câu AI: $aiSentenceGradingRemainingToday / ${UserPreferences.DEFAULT_AI_SENTENCE_LIMIT} lượt",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Text(
+                text = "Đồ án Lập trình Thiết bị Di động • Trường Đại học Giao thông Vận tải TP.HCM (UTH)",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }
 
 /**
