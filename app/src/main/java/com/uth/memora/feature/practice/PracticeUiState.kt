@@ -1,5 +1,6 @@
 package com.uth.memora.feature.practice
 
+import com.uth.memora.core.domain.SentenceLocalValidator
 import com.uth.memora.core.model.Card
 import com.uth.memora.core.model.PracticeSentence
 import com.uth.memora.core.model.SentenceStatus
@@ -74,7 +75,32 @@ data class PracticeUiState(
     val isGradingShimmerVisible: Boolean
         get() = isSubmitting || history.any { it.status == SentenceStatus.GRADING }
 
-    /** Cho phép bấm nút "Chấm điểm câu" khi đã đăng nhập, có thẻ chọn, có nội dung và không đang gửi (Mục 6.7 & 9.5). */
+    /** `true` nếu câu đang nhập trùng hệt với câu đang ở trạng thái `PENDING_GRADE` hoặc `GRADING` trong lịch sử (Mục 6.7 & 11). */
+    val isDuplicateInFlight: Boolean
+        get() {
+            val cleanInput = inputText.trim()
+            if (cleanInput.isEmpty()) return false
+            return history.any { existing ->
+                existing.sentence.trim().equals(cleanInput, ignoreCase = true) &&
+                    (existing.status == SentenceStatus.PENDING_GRADE ||
+                        existing.status == SentenceStatus.GRADING)
+            }
+        }
+
+    /** `true` khi câu nhập đã vượt qua kiểm tra cục bộ `SentenceLocalValidator.validate()` (Mục 6.8). */
+    val isInputValid: Boolean
+        get() {
+            val target = selectedCard ?: return false
+            if (inputText.isBlank()) return false
+            return validationError == null &&
+                SentenceLocalValidator.validate(target.word, inputText).isValid
+        }
+
+    /** Nút Gửi chỉ sáng khi đã đăng nhập, câu hợp lệ cục bộ, không đang gửi và không trùng câu đang chờ/đang chấm (Mục 6.7, 6.8 & 11). */
     val canSubmit: Boolean
-        get() = !isGuest && selectedCard != null && inputText.isNotBlank() && !isSubmitting
+        get() = !isGuest &&
+            selectedCard != null &&
+            isInputValid &&
+            !isSubmitting &&
+            !isDuplicateInFlight
 }

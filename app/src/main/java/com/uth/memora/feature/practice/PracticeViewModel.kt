@@ -299,20 +299,32 @@ class PracticeViewModel(
     }
 
     /**
-     * Cập nhật câu người học đang nhập và kiểm tra giới hạn độ dài tức thì (Mục 6.8 & 11).
+     * Cập nhật câu người học đang nhập và chạy kiểm tra cục bộ tức thì bằng [SentenceLocalValidator.validate]
+     * để hiển thị lỗi tiếng Việt ngay dưới ô nhập (Mục 6.8 & 11).
      */
     fun onInputTextChange(newText: String) {
-        val trimmedLength = newText.trim().length
-        val instantLengthError = if (trimmedLength > PracticeSentence.MAX_SENTENCE_LENGTH) {
-            "Câu không được vượt quá ${PracticeSentence.MAX_SENTENCE_LENGTH} ký tự (hiện tại: $trimmedLength)."
-        } else {
-            null
+        val targetCard = _uiState.value.selectedCard
+        val liveValidationError = when {
+            newText.isBlank() -> null
+            targetCard != null -> {
+                val result = SentenceLocalValidator.validate(
+                    targetWord = targetCard.word,
+                    rawSentence = newText
+                )
+                if (result.isValid) null else result.errorMessageVi
+            }
+
+            newText.trim().length > PracticeSentence.MAX_SENTENCE_LENGTH -> {
+                "Câu không được vượt quá ${PracticeSentence.MAX_SENTENCE_LENGTH} ký tự (hiện tại: ${newText.trim().length})."
+            }
+
+            else -> null
         }
 
         _uiState.update {
             it.copy(
                 inputText = newText,
-                validationError = instantLengthError,
+                validationError = liveValidationError,
                 errorMessage = null,
                 feedbackMessage = null
             )
@@ -365,7 +377,7 @@ class PracticeViewModel(
 
         // Chống gửi trùng câu đang ở trạng thái Chờ chấm hoặc Đang chấm (Mục 6.7 & 9.5)
         val isDuplicateInFlight = state.history.any { existing ->
-            existing.sentence.equals(cleanSentence, ignoreCase = true) &&
+            existing.sentence.trim().equals(cleanSentence, ignoreCase = true) &&
                 (existing.status == SentenceStatus.PENDING_GRADE ||
                     existing.status == SentenceStatus.GRADING)
         }
