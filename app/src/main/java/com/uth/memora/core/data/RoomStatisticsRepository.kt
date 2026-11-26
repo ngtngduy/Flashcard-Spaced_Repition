@@ -8,11 +8,13 @@ import com.uth.memora.core.database.mapper.toDomain
 import com.uth.memora.core.domain.AuthRepository
 import com.uth.memora.core.domain.StatisticsRepository
 import com.uth.memora.core.domain.UserPreferencesRepository
+import com.uth.memora.core.domain.logic.StreakCalculator
 import com.uth.memora.core.model.Card
 import com.uth.memora.core.model.Deck
 import com.uth.memora.core.model.RetentionStage
 import com.uth.memora.core.model.ReviewQuality
 import com.uth.memora.core.model.StudyStatistics
+import com.uth.memora.core.model.UserPreferences
 import com.uth.memora.core.sm2.LearningDayCalculator
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -52,12 +54,13 @@ class RoomStatisticsRepository(
                 cardDao.observeAllActiveCards(ownerId),
                 reviewLogDao.observeAllValidLogs(ownerId),
                 preferencesRepository.observeUserPreferences()
-            ) { cardEntities, logEntities, _ ->
+            ) { cardEntities, logEntities, preferences ->
                 val nowMillis = clockMillisProvider()
                 val todayLearningDay = learningDayProvider(nowMillis)
                 buildStatistics(
                     cardEntities = cardEntities,
                     logEntities = logEntities,
+                    preferences = preferences,
                     todayLearningDay = todayLearningDay,
                     nowMillis = nowMillis
                 )
@@ -65,9 +68,10 @@ class RoomStatisticsRepository(
         }
     }
 
-    private fun buildStatistics(
+    internal fun buildStatistics(
         cardEntities: List<CardEntity>,
         logEntities: List<ReviewLogEntity>,
+        preferences: UserPreferences,
         todayLearningDay: Long,
         nowMillis: Long
     ): StudyStatistics {
@@ -82,20 +86,52 @@ class RoomStatisticsRepository(
         val masteredCardsCount = stageDistribution[RetentionStage.LEVEL_5_MASTERED] ?: 0
         val totalStudyTimeSeconds = computeTotalStudyTimeSeconds(validLogs)
 
+        val dailyLimit = preferences.dailyNewCardsLimit.coerceIn(
+            UserPreferences.MIN_DAILY_NEW_CARDS,
+            UserPreferences.MAX_DAILY_NEW_CARDS
+        )
         val newCardsLearnedToday = activeCards.count { it.firstSeenDay == todayLearningDay }
+        val remainingNewCardsToday = (dailyLimit - newCardsLearnedToday).coerceAtLeast(0)
+
         val reviewsToday = validLogs.count { it.learningDay == todayLearningDay }
         val dueCardsCount = activeCards.count { it.isDue(todayLearningDay, nowMillis) }
 
+        val displayStreak = StreakCalculator.evaluateDisplayStreak(
+            currentStreak = preferences.currentStreak,
+            lastStudyDay = preferences.lastStudyLearningDay,
+            todayLearningDay = todayLearningDay,
+            isFreezeAvailable = preferences.hasStreakFreezeAvailable,
+            lastFreezeUsedDay = preferences.lastStreakFreezeUsedDay
+        )
+        val isStreakProtectedToday = displayStreak.isProtectedToday ||
+            preferences.isStreakFreezeActive ||
+            preferences.lastStreakFreezeUsedDay == todayLearningDay ||
+            (preferences.lastStreakFreezeUsedDay == todayLearningDay - 1L &&
+                preferences.lastStudyLearningDay == todayLearningDay)
+        val nextFreezeAvailableInDays = if (
+            displayStreak.isProtectedToday && displayStreak.nextFreezeAvailableInDays == 0
+        ) {
+            StreakCalculator.FREEZE_RECOVERY_DAYS.toInt()
+        } else {
+            displayStreak.nextFreezeAvailableInDays
+        }
+
         return StudyStatistics(
             newCardsLearnedToday = newCardsLearnedToday,
+            dailyNewCardLimit = dailyLimit,
             reviewsToday = reviewsToday,
             dueCardsCount = dueCardsCount,
+            remainingNewCardsToday = remainingNewCardsToday,
+            currentStreakDays = displayStreak.displayedStreak,
             totalStudyTimeSeconds = totalStudyTimeSeconds,
             masteredCardsCount = masteredCardsCount,
             totalActiveCardsCount = activeCards.size,
             stageDistribution = stageDistribution,
             retentionRatePercent = retentionRatePercent,
-            reviewsLast7DaysCount = reviewsLast7DaysCount
+            reviewsLast7DaysCount = reviewsLast7DaysCount,
+            streakFreezeAvailable = displayStreak.isFreezeAvailable,
+            isStreakProtectedToday = isStreakProtectedToday,
+            nextFreezeAvailableInDays = nextFreezeAvailableInDays
         )
     }
 
