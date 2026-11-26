@@ -7,13 +7,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -122,6 +120,40 @@ fun AnalyticsScreen(
                     masteredCardsCount = uiState.masteredCardsCount
                 )
             }
+
+            item(key = "analytics_sm2_note") {
+                Sm2AlgorithmGuideCard()
+            }
+        }
+    }
+}
+
+@Composable
+private fun Sm2AlgorithmGuideCard(
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "CƠ CHẾ ĐO LƯỜNG SM-2",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = KickerBlue
+            )
+            Text(
+                text = "Ngày học mới bắt đầu lúc 04:00 sáng. Mỗi lượt xem thẻ được ghi nhận tối đa 60 giây tập trung và các lượt bấm Hoàn tác (Undo 5s) được tự động loại trừ để phản ánh chính xác trí nhớ thực tế.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
