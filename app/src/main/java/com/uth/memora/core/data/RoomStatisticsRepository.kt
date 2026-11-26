@@ -8,7 +8,9 @@ import com.uth.memora.core.database.mapper.toDomain
 import com.uth.memora.core.domain.AuthRepository
 import com.uth.memora.core.domain.StatisticsRepository
 import com.uth.memora.core.domain.UserPreferencesRepository
+import com.uth.memora.core.model.Card
 import com.uth.memora.core.model.Deck
+import com.uth.memora.core.model.RetentionStage
 import com.uth.memora.core.model.ReviewQuality
 import com.uth.memora.core.model.StudyStatistics
 import com.uth.memora.core.sm2.LearningDayCalculator
@@ -76,6 +78,9 @@ class RoomStatisticsRepository(
             validLogs = validLogs,
             todayLearningDay = todayLearningDay
         )
+        val stageDistribution = computeStageDistribution(activeCards)
+        val masteredCardsCount = stageDistribution[RetentionStage.LEVEL_5_MASTERED] ?: 0
+        val totalStudyTimeSeconds = computeTotalStudyTimeSeconds(validLogs)
 
         val newCardsLearnedToday = activeCards.count { it.firstSeenDay == todayLearningDay }
         val reviewsToday = validLogs.count { it.learningDay == todayLearningDay }
@@ -85,10 +90,33 @@ class RoomStatisticsRepository(
             newCardsLearnedToday = newCardsLearnedToday,
             reviewsToday = reviewsToday,
             dueCardsCount = dueCardsCount,
+            totalStudyTimeSeconds = totalStudyTimeSeconds,
+            masteredCardsCount = masteredCardsCount,
             totalActiveCardsCount = activeCards.size,
+            stageDistribution = stageDistribution,
             retentionRatePercent = retentionRatePercent,
             reviewsLast7DaysCount = reviewsLast7DaysCount
         )
+    }
+
+    /**
+     * Phân bố số lượng thẻ theo đủ 6 cấp độ [RetentionStage] (Mục 6.9 & Mục 10.2).
+     * Bảo đảm luôn trả đủ 6 khóa kể cả khi một cấp có 0 thẻ.
+     */
+    internal fun computeStageDistribution(activeCards: List<Card>): Map<RetentionStage, Int> {
+        val countsByStage = activeCards.groupingBy { it.retentionStage }.eachCount()
+        return RetentionStage.entries.associateWith { stage ->
+            countsByStage[stage] ?: 0
+        }
+    }
+
+    /**
+     * Tổng thời gian học hợp lệ từ các lượt đánh giá chưa bị hoàn tác (Mục 10.2).
+     */
+    internal fun computeTotalStudyTimeSeconds(validLogs: List<ReviewLogEntity>): Long {
+        return validLogs
+            .filter { !it.isUndone }
+            .sumOf { it.durationValidSeconds.coerceIn(1, 60).toLong() }
     }
 
     /**
