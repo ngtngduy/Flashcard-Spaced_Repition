@@ -577,9 +577,9 @@ class PracticeViewModel(
     }
 
     /**
-     * Lưu câu đã chỉnh sửa từ AI làm câu ví dụ riêng cho thẻ hiện tại (Figma 2212:91 · Mục 6.7).
+     * Lưu câu đã chỉnh sửa từ AI làm câu ví dụ riêng cho thẻ hiện tại (Figma 2212:91..92 · Mục 6.7).
      */
-    fun saveCorrectedSentenceAsExample(sentenceId: String) {
+    fun saveCorrectedAsExample(sentenceId: String) {
         val state = _uiState.value
         if (sentenceId.isBlank() || state.savingExampleSentenceId != null) return
 
@@ -627,6 +627,13 @@ class PracticeViewModel(
                 }
             )
         }
+    }
+
+    /**
+     * Alias tương thích chuyển sang [saveCorrectedAsExample] (Mục 6.7).
+     */
+    fun saveCorrectedSentenceAsExample(sentenceId: String) {
+        saveCorrectedAsExample(sentenceId)
     }
 
     /**
