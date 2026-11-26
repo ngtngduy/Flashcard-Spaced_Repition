@@ -17,6 +17,7 @@ import com.uth.memora.core.model.PartOfSpeech
 import com.uth.memora.core.model.SyncStatus
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -53,8 +54,17 @@ class RoomCardRepository(
             ?: flow { emit(ownerIdProvider()) }
 
         return ownerFlow.flatMapLatest { ownerId ->
-            cardDao.observeAllActiveCards(ownerId).map { entities ->
-                entities.map { it.toDomain() }
+            if (ownerId == DeckDao.PREBUILT_OWNER_ID) {
+                cardDao.observeAllActiveCards(ownerId).map { entities ->
+                    entities.map { it.toDomain() }
+                }
+            } else {
+                combine(
+                    cardDao.observeAllActiveCards(ownerId),
+                    cardDao.observeAllActiveCards(DeckDao.PREBUILT_OWNER_ID)
+                ) { userEntities, prebuiltEntities ->
+                    (userEntities + prebuiltEntities).map { it.toDomain() }
+                }
             }
         }
     }
