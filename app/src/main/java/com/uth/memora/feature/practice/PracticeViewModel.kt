@@ -20,6 +20,7 @@ import com.uth.memora.integration.worker.SentenceGradingWorker
 import com.uth.memora.memoraViewModelFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -61,12 +62,13 @@ class PracticeViewModel(
 
     private var lastObservedUserUid: String? = null
     private var hasObservedInitialUser: Boolean = false
+    private var loadTargetCardsJob: Job? = null
 
     init {
         observeAuthUser()
         observeQuotaPreferences()
         observeSelectedCardSentences()
-        loadTargetCards(initialDeckId)
+        refreshTargetCards()
     }
 
     /**
@@ -100,7 +102,7 @@ class PracticeViewModel(
 
                     // Tải lại danh sách từ gợi ý khi người dùng chuyển đổi tài khoản (Mục 6.7 & 13)
                     if (wasInitialized && previousUid != currentUser?.uid) {
-                        loadTargetCards(_uiState.value.selectedDeckId)
+                        refreshTargetCards()
                     }
 
                     // Khôi phục hàng đợi chấm câu ngoại tuyến khi đã đăng nhập tài khoản thật (Mục 6.8 & 8.2)
@@ -169,42 +171,63 @@ class PracticeViewModel(
     }
 
     /**
-     * Tải danh sách tối đa 5 thẻ từ vựng mục tiêu cho buổi luyện đặt câu (Mục 6.7 · Figma 2212:88).
+     * Làm mới danh sách tối đa 5 từ mục tiêu (ưu tiên thẻ đang học / vừa ôn sai / đến hạn)
+     * theo `selectedDeckId` hiện tại khi khởi tạo hoặc bấm nút làm mới (Mục 6.7 · Figma 2212:88).
+     */
+    fun refreshTargetCards() {
+        loadSuggestedTargetCards(selectedDeckId = _uiState.value.selectedDeckId)
+    }
+
+    /**
+     * Chọn bộ từ để lọc danh sách từ luyện đặt câu (`null` = lấy trên toàn bộ thẻ đang học)
+     * và tải lại tối đa 5 từ mục tiêu (Mục 6.7 · Figma 2212:89).
+     */
+    fun selectDeck(deckId: String?) {
+        val normalizedDeck = normalizeDeckId(deckId)
+        loadSuggestedTargetCards(selectedDeckId = normalizedDeck)
+    }
+
+    /**
+     * Tải danh sách tối đa 5 thẻ mục tiêu từ [PracticeSentenceRepository.getSuggestedPracticeCards] (Mục 6.7).
      */
     fun loadTargetCards(deckId: String? = _uiState.value.selectedDeckId) {
-        val normalizedDeck = normalizeDeckId(deckId)
-        viewModelScope.launch {
+        loadSuggestedTargetCards(selectedDeckId = normalizeDeckId(deckId))
+    }
+
+    private fun loadSuggestedTargetCards(selectedDeckId: String?) {
+        loadTargetCardsJob?.cancel()
+        loadTargetCardsJob = viewModelScope.launch {
             _uiState.update {
                 it.copy(
                     isLoading = true,
-                    selectedDeckId = normalizedDeck,
-                    errorMessage = null
+                    selectedDeckId = selectedDeckId,
+                    errorMessage = null,
+                    feedbackMessage = null
                 )
             }
 
             try {
+                // Lấy tối đa 5 từ mục tiêu, ưu tiên thẻ vừa học / ôn sai (Mục 6.7)
                 val suggestedCards = practiceSentenceRepository.getSuggestedPracticeCards(
-                    deckId = normalizedDeck,
-                    limit = PracticeSentence.MAX_WORDS_PER_SESSION
+                    deckId = selectedDeckId,
+                    limit = TARGET_CARDS_LIMIT
                 )
+                    .filter { !it.isDeleted }
+                    .take(TARGET_CARDS_LIMIT)
 
                 _uiState.update { current ->
-                    val currentSelectedId = current.selectedCard?.id
-                    val preservedIndex = if (currentSelectedId != null) {
-                        suggestedCards.indexOfFirst { it.id == currentSelectedId }
-                    } else {
-                        -1
-                    }
-                    val resolvedIndex = if (preservedIndex >= 0) preservedIndex else 0
+                    val previousCardId = current.selectedCard?.id
+                    val resolvedIndex = 0
                     val nextCardId = suggestedCards.getOrNull(resolvedIndex)?.id
-                    val isCardChanged = nextCardId != currentSelectedId
+                    val isCardChanged = nextCardId != previousCardId
 
                     current.copy(
                         isLoading = false,
+                        selectedDeckId = selectedDeckId,
                         targetCards = suggestedCards,
                         selectedCardIndex = resolvedIndex,
                         inputText = if (isCardChanged) "" else current.inputText,
-                        validationError = if (isCardChanged) null else current.validationError,
+                        validationError = null,
                         history = if (isCardChanged) emptyList() else current.history
                     )
                 }
@@ -225,23 +248,34 @@ class PracticeViewModel(
     }
 
     /**
-     * Đổi sang thẻ mục tiêu tại vị trí [index] trong danh sách 5 từ của buổi luyện (Mục 6.7).
+     * Chọn thẻ mục tiêu tại vị trí [index] trong danh sách tối đa 5 từ của buổi luyện (Mục 6.7).
      */
-    fun selectCard(index: Int) {
+    fun selectTargetCard(index: Int) {
         _uiState.update { state ->
             if (index !in state.targetCards.indices || index == state.selectedCardIndex) {
                 state
             } else {
+                val previousCardId = state.selectedCard?.id
+                val nextCardId = state.targetCards.getOrNull(index)?.id
+                val isCardChanged = nextCardId != previousCardId
+
                 state.copy(
                     selectedCardIndex = index,
                     inputText = "",
                     validationError = null,
                     errorMessage = null,
                     feedbackMessage = null,
-                    history = emptyList()
+                    history = if (isCardChanged) emptyList() else state.history
                 )
             }
         }
+    }
+
+    /**
+     * Alias tương thích chuyển sang [selectTargetCard] (Mục 6.7).
+     */
+    fun selectCard(index: Int) {
+        selectTargetCard(index)
     }
 
     /**
@@ -251,7 +285,7 @@ class PracticeViewModel(
         val cards = _uiState.value.targetCards
         if (cards.size <= 1) return
         val nextIndex = (_uiState.value.selectedCardIndex + 1) % cards.size
-        selectCard(nextIndex)
+        selectTargetCard(nextIndex)
     }
 
     /**
@@ -260,7 +294,7 @@ class PracticeViewModel(
     fun selectCardById(cardId: String) {
         val targetIndex = _uiState.value.targetCards.indexOfFirst { it.id == cardId }
         if (targetIndex >= 0) {
-            selectCard(targetIndex)
+            selectTargetCard(targetIndex)
         }
     }
 
@@ -772,6 +806,7 @@ class PracticeViewModel(
         deckId?.trim()?.takeIf { it.isNotEmpty() && !it.equals("all", ignoreCase = true) }
 
     companion object {
+        const val TARGET_CARDS_LIMIT: Int = 5
         const val ERROR_LOGIN_REQUIRED_VI: String =
             "Chức năng Luyện đặt câu với AI yêu cầu đăng nhập tài khoản để sử dụng."
         const val MESSAGE_SAVED_OFFLINE_VI: String =
