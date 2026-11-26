@@ -18,6 +18,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Login
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.BrightnessAuto
 import androidx.compose.material.icons.filled.CloudDone
@@ -27,8 +29,10 @@ import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -37,6 +41,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
@@ -72,6 +77,10 @@ import kotlin.math.roundToInt
 @Composable
 fun SettingsScreen(
     uiState: SettingsUiState,
+    onNavigateToAuth: () -> Unit = {},
+    onRequestSignOut: () -> Unit = {},
+    onConfirmSignOut: () -> Unit = {},
+    onDismissSignOutWarning: () -> Unit = {},
     onSelectThemeMode: (ThemeMode) -> Unit = {},
     onDailyNewCardsLimitChange: (Int) -> Unit = {},
     onToggleReminder: (Boolean) -> Unit = {},
@@ -142,6 +151,14 @@ fun SettingsScreen(
                 }
             }
 
+            item(key = "settings_account_section") {
+                AccountSettingsSection(
+                    uiState = uiState,
+                    onNavigateToAuth = onNavigateToAuth,
+                    onRequestSignOut = onRequestSignOut
+                )
+            }
+
             item(key = "settings_theme_section") {
                 ThemeSelectorSection(
                     selectedMode = uiState.themeMode,
@@ -185,7 +202,183 @@ fun SettingsScreen(
                 onConfirm = onConfirmReminderTime
             )
         }
+
+        if (uiState.isSignOutWarningDialogVisible) {
+            UnsyncedSignOutWarningDialog(
+                pendingChangesCount = uiState.syncSummary.pendingChangesCount.coerceAtLeast(1),
+                onConfirmSignOut = onConfirmSignOut,
+                onDismiss = onDismissSignOutWarning
+            )
+        }
     }
+}
+
+/**
+ * Khối Tài khoản người dùng ở đầu màn Cài đặt (Figma Node 13:2 · Mục 6.2 & 13).
+ */
+@Composable
+fun AccountSettingsSection(
+    uiState: SettingsUiState,
+    onNavigateToAuth: () -> Unit,
+    onRequestSignOut: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val user = uiState.currentUser
+    val isSignedIn = uiState.isSignedInAccount
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(PrimaryBlue.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = "Tài khoản người dùng",
+                        tint = PrimaryBlue,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = if (isSignedIn) "TÀI KHOẢN ĐÃ ĐĂNG NHẬP" else "CHẾ ĐỘ KHÁCH NGOẠI TUYẾN",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = KickerBlue
+                    )
+                    Text(
+                        text = if (isSignedIn) {
+                            user?.displayName?.takeIf { it.isNotBlank() }
+                                ?: user?.email?.takeIf { it.isNotBlank() }
+                                ?: "Học viên Memora"
+                        } else {
+                            "Học viên Khách (Trên thiết bị)"
+                        },
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = if (isSignedIn) {
+                            user?.email?.takeIf { it.isNotBlank() } ?: "UID: ${user?.uid.orEmpty()}"
+                        } else {
+                            "Đăng nhập để sao lưu tiến độ SM-2 và đồng bộ đa thiết bị"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (isSignedIn) {
+                OutlinedButton(
+                    onClick = onRequestSignOut,
+                    enabled = !uiState.isSigningOut,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.6f)),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Logout,
+                        contentDescription = "Đăng xuất",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (uiState.isSigningOut) "Đang đăng xuất..." else "Đăng xuất",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+            } else {
+                Button(
+                    onClick = onNavigateToAuth,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PrimaryBlue
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Login,
+                        contentDescription = "Đăng nhập hoặc Đồng bộ tài khoản",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Đăng nhập / Đồng bộ tài khoản",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UnsyncedSignOutWarningDialog(
+    pendingChangesCount: Int,
+    onConfirmSignOut: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector = Icons.Default.WarningAmber,
+                contentDescription = "Cảnh báo chưa đồng bộ",
+                tint = StatusWarning
+            )
+        },
+        title = {
+            Text(
+                text = "Cảnh báo dữ liệu chưa đồng bộ",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Text(
+                text = "Bạn còn $pendingChangesCount thay đổi chưa đồng bộ lên đám mây, đăng xuất sẽ xóa dữ liệu tài khoản này khỏi máy. Vẫn đăng xuất?",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirmSignOut) {
+                Text(
+                    text = "Vẫn đăng xuất",
+                    color = MaterialTheme.colorScheme.error,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Ở lại & Đồng bộ trước")
+            }
+        }
+    )
 }
 
 /**
