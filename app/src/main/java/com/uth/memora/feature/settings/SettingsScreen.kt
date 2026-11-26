@@ -20,6 +20,8 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,9 +33,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.uth.memora.core.model.ThemeMode
+import com.uth.memora.core.model.UserPreferences
 import com.uth.memora.feature.theme.KickerBlue
 import com.uth.memora.feature.theme.MemoraTheme
 import com.uth.memora.feature.theme.PrimaryBlue
+import kotlin.math.roundToInt
 
 /**
  * Màn hình Cài đặt ứng dụng (Figma Node 13:2 · Mục 6.2, 6.10, 11 & 13).
@@ -42,6 +46,7 @@ import com.uth.memora.feature.theme.PrimaryBlue
 fun SettingsScreen(
     uiState: SettingsUiState,
     onSelectThemeMode: (ThemeMode) -> Unit = {},
+    onDailyNewCardsLimitChange: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -107,6 +112,112 @@ fun SettingsScreen(
                 ThemeSelectorSection(
                     selectedMode = uiState.themeMode,
                     onSelectThemeMode = onSelectThemeMode
+                )
+            }
+
+            item(key = "settings_daily_limit_section") {
+                DailyNewCardsLimitSection(
+                    dailyLimit = uiState.dailyNewCardsLimit,
+                    onDailyLimitChange = onDailyNewCardsLimitChange
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Thanh trượt điều chỉnh mục tiêu thẻ mới mỗi ngày từ 5 đến 50 thẻ (Figma Node 13:2 & Mục 11).
+ */
+@Composable
+fun DailyNewCardsLimitSection(
+    dailyLimit: Int,
+    onDailyLimitChange: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val clampedLimit = dailyLimit.coerceIn(
+        UserPreferences.MIN_DAILY_NEW_CARDS,
+        UserPreferences.MAX_DAILY_NEW_CARDS
+    )
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "HẠN MỨC HỌC TẬP",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = KickerBlue
+                    )
+                    Text(
+                        text = "Mục tiêu thẻ mới mỗi ngày",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = PrimaryBlue.copy(alpha = 0.16f)
+                ) {
+                    Text(
+                        text = "$clampedLimit thẻ / ngày",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                        color = PrimaryBlue,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+            }
+
+            Slider(
+                value = clampedLimit.toFloat(),
+                onValueChange = { rawValue ->
+                    onDailyLimitChange(
+                        rawValue.roundToInt().coerceIn(
+                            UserPreferences.MIN_DAILY_NEW_CARDS,
+                            UserPreferences.MAX_DAILY_NEW_CARDS
+                        )
+                    )
+                },
+                valueRange = UserPreferences.MIN_DAILY_NEW_CARDS.toFloat()..UserPreferences.MAX_DAILY_NEW_CARDS.toFloat(),
+                colors = SliderDefaults.colors(
+                    thumbColor = PrimaryBlue,
+                    activeTrackColor = PrimaryBlue,
+                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Tối thiểu: ${UserPreferences.MIN_DAILY_NEW_CARDS} thẻ",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "Khuyến nghị: ${UserPreferences.DEFAULT_DAILY_NEW_CARDS} thẻ",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "Tối đa: ${UserPreferences.MAX_DAILY_NEW_CARDS} thẻ",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
