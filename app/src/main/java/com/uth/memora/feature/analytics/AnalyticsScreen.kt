@@ -44,6 +44,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.uth.memora.core.model.RetentionStage
 import com.uth.memora.core.model.StudyStatistics
+import com.uth.memora.feature.analytics.components.StageChart
 import com.uth.memora.feature.analytics.components.StreakFreezeCard
 import com.uth.memora.feature.theme.KickerBlue
 import com.uth.memora.feature.theme.MemoraTheme
@@ -111,6 +112,14 @@ fun AnalyticsScreen(
                     status = uiState.streakFreezeStatus,
                     currentStreakDays = uiState.currentStreakDays,
                     nextFreezeAvailableInDays = uiState.nextFreezeAvailableInDays
+                )
+            }
+
+            item(key = "analytics_stage_chart") {
+                StageChart(
+                    stageItems = uiState.stageItems,
+                    totalActiveCardsCount = uiState.totalActiveCardsCount,
+                    masteredCardsCount = uiState.masteredCardsCount
                 )
             }
         }
