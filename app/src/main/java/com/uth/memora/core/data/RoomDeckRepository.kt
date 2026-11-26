@@ -8,6 +8,8 @@ import com.uth.memora.core.database.mapper.toDomain
 import com.uth.memora.core.database.mapper.toEntity
 import com.uth.memora.core.domain.AuthRepository
 import com.uth.memora.core.domain.DeckRepository
+import com.uth.memora.core.model.Card
+import com.uth.memora.core.model.CardState
 import com.uth.memora.core.model.Deck
 import com.uth.memora.core.model.SyncStatus
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -17,6 +19,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import java.util.UUID
 
 /**
@@ -30,6 +33,7 @@ class RoomDeckRepository(
     private val deckDao: DeckDao,
     private val cardDao: CardDao,
     private val authRepository: AuthRepository? = null,
+    private val prebuiltDeckSeeder: PrebuiltDeckSeeder? = null,
     private val ownerIdProvider: suspend () -> String = {
         authRepository?.getCurrentUser()?.uid?.takeIf { it.isNotBlank() } ?: Deck.GUEST_OWNER_ID
     },
@@ -58,9 +62,11 @@ class RoomDeckRepository(
     }
 
     override fun observePrebuiltDecks(): Flow<List<Deck>> =
-        deckDao.observePrebuiltDecks().map { entities ->
-            entities.map { it.toDomain() }
-        }
+        deckDao.observePrebuiltDecks()
+            .onStart { prebuiltDeckSeeder?.seedIfNeeded() }
+            .map { entities ->
+                entities.map { it.toDomain() }
+            }
 
     override suspend fun getDeckById(deckId: String): Deck? {
         val cleanId = deckId.trim()
@@ -164,9 +170,11 @@ class RoomDeckRepository(
         if (cleanPrebuiltId.isEmpty()) {
             throw IllegalArgumentException("Mã bộ từ có sẵn không hợp lệ.")
         }
+        prebuiltDeckSeeder?.seedIfNeeded()
+
         val ownerId = ownerIdProvider()
         val existingImported = deckDao.getDeckBySourcePrebuiltId(ownerId, cleanPrebuiltId)
-        if (existingImported != null) {
+        if (existingImported != null && !existingImported.isDeleted) {
             return@runCatching existingImported.toDomain()
         }
 
@@ -201,6 +209,15 @@ class RoomDeckRepository(
                 id = UUID.randomUUID().toString(),
                 deckId = newDeckId,
                 ownerId = ownerId,
+                state = CardState.NEW,
+                easeFactor = Card.INITIAL_EASE_FACTOR,
+                repetitions = 0,
+                interval = 0,
+                lapses = 0,
+                dueDay = null,
+                dueAtMillis = null,
+                firstSeenDay = null,
+                lastReviewedAtMillis = null,
                 createdAtMillis = now + index,
                 updatedAtMillis = now + index,
                 isDeleted = false,
