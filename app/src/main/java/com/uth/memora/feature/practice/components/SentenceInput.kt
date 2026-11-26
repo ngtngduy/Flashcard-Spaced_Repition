@@ -20,6 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -42,6 +44,9 @@ import com.uth.memora.core.model.PracticeSentence
 import com.uth.memora.feature.common.MemoraSectionCard
 import com.uth.memora.feature.theme.MemoraTheme
 import com.uth.memora.feature.theme.StatusWarning
+import com.uth.memora.feature.theme.StatusWarningLight
+import com.uth.memora.feature.theme.SurfaceLight
+import com.uth.memora.integration.speech.SpeechUiState
 
 /**
  * Khung nhập câu tiếng Anh và nút gửi chấm điểm AI theo Figma Node 2063:47 & 2212:131 (Mục 6.7, 6.8 & 11):
@@ -61,8 +66,13 @@ fun SentenceInput(
     modifier: Modifier = Modifier,
     isDuplicateInFlight: Boolean = false,
     enabled: Boolean = true,
+    speechState: SpeechUiState = SpeechUiState.Idle,
+    isLowConfidenceVoiceInput: Boolean = false,
     voiceActionContent: (@Composable () -> Unit)? = null
 ) {
+    val isListening = speechState is SpeechUiState.Listening ||
+        speechState is SpeechUiState.PartialResult
+
     val effectiveCanSubmit = canSubmit &&
         enabled &&
         !isSubmitting &&
@@ -71,12 +81,15 @@ fun SentenceInput(
 
     val trimmedLength = inputText.trim().length
     val statusLabel = when {
+        speechState is SpeechUiState.Listening -> "Đang lắng nghe..."
+        speechState is SpeechUiState.PartialResult -> "Đang nhận diện..."
         isSubmitting -> "Đang chấm"
         isDuplicateInFlight -> "Đang xử lý"
         trimmedLength > 0 -> "$trimmedLength/${PracticeSentence.MAX_SENTENCE_LENGTH}"
         else -> "Chưa gửi"
     }
     val statusColor = when {
+        isListening -> MaterialTheme.colorScheme.error
         isSubmitting -> MaterialTheme.colorScheme.secondary
         isDuplicateInFlight -> StatusWarning
         trimmedLength > PracticeSentence.MAX_SENTENCE_LENGTH -> MaterialTheme.colorScheme.error
@@ -109,12 +122,12 @@ fun SentenceInput(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Ô nhập câu tiếng Anh (Figma 2063:51) kèm slot tùy chọn cho nút Micro (Figma 2230:145)
+        // Ô nhập câu tiếng Anh (Figma 2063:51 & 2230:194) kèm slot nút Micro (Figma 2230:145)
         Box(modifier = Modifier.fillMaxWidth()) {
-            val placeholderText = if (targetWord.isNotBlank()) {
-                "Nhập câu tiếng Anh có chứa từ \"$targetWord\"..."
-            } else {
-                "Nhập câu tiếng Anh của bạn tại đây..."
+            val placeholderText = when {
+                isListening -> "Đang lắng nghe... Hãy nói câu tiếng Anh của bạn"
+                targetWord.isNotBlank() -> "Nhập câu tiếng Anh có chứa từ \"$targetWord\"..."
+                else -> "Nhập câu tiếng Anh của bạn tại đây..."
             }
 
             OutlinedTextField(
@@ -122,7 +135,7 @@ fun SentenceInput(
                 onValueChange = onInputTextChange,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 124.dp),
+                    .heightIn(min = if (voiceActionContent != null) 140.dp else 124.dp),
                 enabled = enabled && !isSubmitting,
                 isError = validationError != null,
                 placeholder = {
@@ -152,8 +165,8 @@ fun SentenceInput(
                 ),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = if (inputText.isNotBlank() && validationError == null) {
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
+                    unfocusedBorderColor = if (isListening || (inputText.isNotBlank() && validationError == null)) {
+                        MaterialTheme.colorScheme.primary.copy(alpha = if (isListening) 1f else 0.75f)
                     } else {
                         MaterialTheme.colorScheme.outline
                     },
@@ -169,9 +182,121 @@ fun SentenceInput(
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(10.dp)
+                        .padding(end = 5.dp, bottom = 5.dp)
                 ) {
                     voiceActionContent()
+                }
+            }
+        }
+
+        // Trạng thái ghi âm trực tiếp hoặc lỗi từ SpeechRecognizer (Figma 2230:194 · Mục 6.7 & 9.5)
+        when (speechState) {
+            is SpeechUiState.Listening -> {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Mic,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Text(
+                        text = if (inputText.isBlank()) {
+                            "Chạm lại nút Micro khi bạn đọc xong."
+                        } else {
+                            "Đang lắng nghe... Chạm lại nút Micro khi bạn đọc xong."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            is SpeechUiState.PartialResult -> {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Mic,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .padding(top = 1.dp)
+                            .size(15.dp)
+                    )
+                    Text(
+                        text = "Đang nghe: \"${speechState.text}\"",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            is SpeechUiState.Error -> {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ErrorOutline,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier
+                            .padding(top = 1.dp)
+                            .size(15.dp)
+                    )
+                    Text(
+                        text = speechState.messageVi,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+
+            SpeechUiState.Idle,
+            is SpeechUiState.Result -> Unit
+        }
+
+        // Nhắc nhẹ khi độ tin cậy nhận diện giọng nói < 0.7f để người học rà lại trước khi gửi (Mục 6.7)
+        if (isLowConfidenceVoiceInput && !isListening) {
+            val isLight = MaterialTheme.colorScheme.surface == SurfaceLight
+            val warningTint = if (isLight) StatusWarningLight else StatusWarning
+            Spacer(modifier = Modifier.height(8.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                color = warningTint.copy(alpha = 0.12f),
+                border = BorderStroke(1.dp, warningTint.copy(alpha = 0.35f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.WarningAmber,
+                        contentDescription = null,
+                        tint = warningTint,
+                        modifier = Modifier
+                            .padding(top = 1.dp)
+                            .size(15.dp)
+                    )
+                    Text(
+                        text = "Độ tin cậy nhận diện giọng nói chưa cao — bạn vui lòng rà lại câu trước khi bấm Gửi.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
                 }
             }
         }
@@ -336,6 +461,60 @@ private fun SentenceInputSubmittingLightPreview() {
                 canSubmit = false,
                 onInputTextChange = {},
                 onSubmit = {},
+                modifier = Modifier.padding(16.dp)
+            )
+        }
+    }
+}
+
+@Preview(name = "SentenceInput - Đang thu âm (Figma 2230:194)", showBackground = true)
+@Composable
+private fun SentenceInputListeningDarkPreview() {
+    MemoraTheme(darkTheme = true) {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            SentenceInput(
+                targetWord = "Narrative",
+                inputText = "",
+                validationError = null,
+                isSubmitting = false,
+                canSubmit = false,
+                onInputTextChange = {},
+                onSubmit = {},
+                speechState = SpeechUiState.Listening,
+                voiceActionContent = {
+                    MicButton(
+                        speechState = SpeechUiState.Listening,
+                        onStartClick = {},
+                        onStopClick = {}
+                    )
+                },
+                modifier = Modifier.padding(16.dp)
+            )
+        }
+    }
+}
+
+@Preview(name = "SentenceInput - Nhắc độ tin cậy thấp (Dark)", showBackground = true)
+@Composable
+private fun SentenceInputLowConfidenceDarkPreview() {
+    MemoraTheme(darkTheme = true) {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            SentenceInput(
+                targetWord = "Narrative",
+                inputText = "The movie is a narrative about a young artist.",
+                validationError = null,
+                isSubmitting = false,
+                canSubmit = true,
+                onInputTextChange = {},
+                onSubmit = {},
+                isLowConfidenceVoiceInput = true,
+                voiceActionContent = {
+                    MicButton(
+                        speechState = SpeechUiState.Idle,
+                        onStartClick = {},
+                        onStopClick = {}
+                    )
+                },
                 modifier = Modifier.padding(16.dp)
             )
         }

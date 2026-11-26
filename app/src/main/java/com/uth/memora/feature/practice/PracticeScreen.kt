@@ -56,6 +56,7 @@ import com.uth.memora.feature.common.MemoraPrimaryButton
 import com.uth.memora.feature.common.MemoraSectionCard
 import com.uth.memora.feature.common.MemoraStatusBadge
 import com.uth.memora.feature.common.shimmer.AiResultShimmerSkeleton
+import com.uth.memora.feature.practice.components.MicButton
 import com.uth.memora.feature.practice.components.SentenceHistory
 import com.uth.memora.feature.practice.components.SentenceInput
 import com.uth.memora.feature.practice.components.TargetWordCard
@@ -63,6 +64,7 @@ import com.uth.memora.feature.theme.MemoraTheme
 import com.uth.memora.feature.theme.StatusWarning
 import com.uth.memora.feature.theme.StatusWarningLight
 import com.uth.memora.feature.theme.SurfaceLight
+import com.uth.memora.integration.speech.SpeechUiState
 
 private const val QUOTA_EXHAUSTED_NOTICE_VI =
     "Bạn đã dùng hết 20 lượt chấm AI hôm nay (tự hồi lúc 4:00 sáng)"
@@ -90,6 +92,10 @@ fun PracticeScreen(
     onDismissMessage: () -> Unit = {},
     modifier: Modifier = Modifier,
     isOnline: Boolean = true,
+    isVoiceInputAvailable: Boolean = true,
+    speechState: SpeechUiState = SpeechUiState.Idle,
+    onStartVoiceInput: () -> Unit = {},
+    onStopVoiceInput: () -> Unit = {},
     voiceActionContent: (@Composable () -> Unit)? = null,
     resultSectionContent: (@Composable () -> Unit)? = null
 ) {
@@ -115,6 +121,8 @@ fun PracticeScreen(
                 PracticeSignedInContent(
                     uiState = uiState,
                     isOnline = isOnline,
+                    isVoiceInputAvailable = isVoiceInputAvailable,
+                    speechState = speechState,
                     onSelectTargetCard = onSelectTargetCard,
                     onNextCard = onNextCard,
                     onRefreshTargetCards = onRefreshTargetCards,
@@ -124,6 +132,8 @@ fun PracticeScreen(
                     onSaveCorrectedAsExample = onSaveCorrectedAsExample,
                     onRetryFailedSentence = onRetryFailedSentence,
                     onDismissMessage = onDismissMessage,
+                    onStartVoiceInput = onStartVoiceInput,
+                    onStopVoiceInput = onStopVoiceInput,
                     voiceActionContent = voiceActionContent,
                     resultSectionContent = resultSectionContent,
                     modifier = Modifier.weight(1f)
@@ -317,6 +327,8 @@ private fun GuestFeatureHighlightRow(
 private fun PracticeSignedInContent(
     uiState: PracticeUiState,
     isOnline: Boolean,
+    isVoiceInputAvailable: Boolean,
+    speechState: SpeechUiState,
     onSelectTargetCard: (Int) -> Unit,
     onNextCard: () -> Unit,
     onRefreshTargetCards: () -> Unit,
@@ -326,6 +338,8 @@ private fun PracticeSignedInContent(
     onSaveCorrectedAsExample: (String) -> Unit,
     onRetryFailedSentence: (String) -> Unit,
     onDismissMessage: () -> Unit,
+    onStartVoiceInput: () -> Unit,
+    onStopVoiceInput: () -> Unit,
     voiceActionContent: (@Composable () -> Unit)?,
     resultSectionContent: (@Composable () -> Unit)?,
     modifier: Modifier = Modifier
@@ -422,7 +436,22 @@ private fun PracticeSignedInContent(
                     onNextCard = onNextCard
                 )
 
-                // Khung nhập câu & nút gửi: khóa nút gửi khi remainingDailyQuota <= 0 (Mục 6.7, 6.8 & 9.5 · D4 & D5)
+                // Khung nhập câu & nút Micro/Gửi: ẩn MicButton duyên dáng nếu thiết bị không hỗ trợ SpeechRecognizer (Mục 6.7, 6.8 & 9.5 · D4, D5, E4 & E5)
+                val effectiveVoiceAction: (@Composable () -> Unit)? = when {
+                    voiceActionContent != null -> voiceActionContent
+                    isVoiceInputAvailable -> {
+                        {
+                            MicButton(
+                                speechState = speechState,
+                                onStartClick = onStartVoiceInput,
+                                onStopClick = onStopVoiceInput,
+                                enabled = !uiState.isSubmitting
+                            )
+                        }
+                    }
+
+                    else -> null
+                }
                 SentenceInput(
                     targetWord = selectedCard.word,
                     inputText = uiState.inputText,
@@ -432,7 +461,9 @@ private fun PracticeSignedInContent(
                     onInputTextChange = onInputTextChange,
                     onSubmit = onSubmitSentence,
                     isDuplicateInFlight = uiState.isDuplicateInFlight,
-                    voiceActionContent = voiceActionContent
+                    speechState = if (isVoiceInputAvailable) speechState else SpeechUiState.Idle,
+                    isLowConfidenceVoiceInput = uiState.isLowConfidenceVoiceInput,
+                    voiceActionContent = effectiveVoiceAction
                 )
 
                 // Hiển thị Shimmer Loading khi history có câu GRADING (hoặc PENDING_GRADE khi vừa gửi lúc online)
