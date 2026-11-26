@@ -53,7 +53,10 @@ data class PracticeUiState(
     val savedExampleSentenceIds: Set<String> = emptySet(),
 
     /** Thông báo phản hồi tích cực bằng tiếng Việt (ví dụ: đã lưu câu sửa, đã xếp hàng chờ chấm offline). */
-    val feedbackMessage: String? = null
+    val feedbackMessage: String? = null,
+
+    /** `true` khi câu nhận diện từ giọng nói có độ tin cậy thấp (< 0.7f), nhắc người học rà lại trước khi gửi (Mục 6.7). */
+    val isLowConfidenceVoiceInput: Boolean = false
 ) {
     /** Thẻ từ vựng mục tiêu hiện tại đang được chọn để đặt câu (Mục 6.7). */
     val selectedCard: Card?

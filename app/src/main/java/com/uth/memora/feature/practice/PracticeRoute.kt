@@ -7,6 +7,7 @@ import android.net.NetworkCapabilities
 import android.speech.tts.TextToSpeech
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -16,14 +17,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.uth.memora.integration.speech.SpeechToTextController
+import com.uth.memora.integration.speech.SpeechUiState
 import com.uth.memora.integration.worker.GradingScheduler
 import com.uth.memora.memoraViewModelFactory
 import java.util.Locale
 
 /**
- * Điểm vào điều hướng cho tab Luyện đặt câu với Chatbot AI (Figma 2061:119 & 2212:109 · Mục 6.7, 6.8 & 8.2).
- * Đấu nối [PracticeViewModel] qua [memoraViewModelFactory], phát âm TTS và theo dõi trạng thái mạng
- * với [PracticeScreen]. Giữ nguyên chữ ký hàm để tương thích với `MemoraNavHost`.
+ * Điểm vào điều hướng cho tab Luyện đặt câu với Chatbot AI (Figma 2061:119, 2212:109 & 2230:194 · Mục 6.7, 6.8 & 8.2).
+ * Đấu nối [PracticeViewModel] qua [memoraViewModelFactory], [SpeechToTextController] (kèm quyền Micro),
+ * phát âm TTS và theo dõi trạng thái mạng với [PracticeScreen]. Giữ nguyên chữ ký hàm để tương thích với `MemoraNavHost`.
  */
 @Composable
 fun PracticeRoute(
@@ -49,15 +52,63 @@ fun PracticeRoute(
     val isOnline by rememberIsNetworkAvailable(appContext)
     val speakWord = rememberPracticeWordSpeaker(appContext)
 
+    // Tích hợp SpeechToTextController và giải phóng khi rời màn để tránh memory leak (Mục 6.7)
+    val speechController = remember(appContext) { SpeechToTextController(appContext) }
+    val speechState by speechController.state.collectAsStateWithLifecycle()
+    DisposableEffect(speechController) {
+        onDispose {
+            speechController.destroy()
+        }
+    }
+
+    // Quản lý quyền RECORD_AUDIO và tự bắt đầu ghi âm ngay khi được cấp quyền (Mục 6.7 & 9.5)
+    val micPermission = rememberMicPermissionState(
+        onPermissionGranted = { speechController.startListening() }
+    )
+
+    // Nhận kết quả Speech-to-Text, tự chuẩn hóa chữ hoa/dấu câu và gắn nhắc nhẹ nếu lowConfidence == true (Mục 6.7 & 6.8)
+    LaunchedEffect(speechState) {
+        val result = speechState as? SpeechUiState.Result ?: return@LaunchedEffect
+        viewModel.onVoiceInputResult(
+            rawTranscript = result.text,
+            lowConfidence = result.lowConfidence
+        )
+        speechController.reset()
+    }
+
+    // Dừng phiên ghi âm nếu người dùng chuyển về chế độ Khách (Mục 4 & 6.7)
+    LaunchedEffect(uiState.isGuest) {
+        if (uiState.isGuest) {
+            speechController.reset()
+        }
+    }
+
     PracticeScreen(
         uiState = uiState,
         onNavigateToAuth = onNavigateToAuth,
-        onSelectTargetCard = viewModel::selectTargetCard,
-        onNextCard = viewModel::selectNextCard,
-        onRefreshTargetCards = viewModel::refreshTargetCards,
+        onSelectTargetCard = { index ->
+            speechController.reset()
+            viewModel.selectTargetCard(index)
+        },
+        onNextCard = {
+            speechController.reset()
+            viewModel.selectNextCard()
+        },
+        onRefreshTargetCards = {
+            speechController.reset()
+            viewModel.refreshTargetCards()
+        },
         onSpeakWord = speakWord,
-        onInputTextChange = viewModel::onInputTextChange,
-        onSubmitSentence = { viewModel.submitSentence(isOnline = isOnline) },
+        onInputTextChange = { newText ->
+            if (speechState != SpeechUiState.Idle) {
+                speechController.reset()
+            }
+            viewModel.onInputTextChange(newText)
+        },
+        onSubmitSentence = {
+            speechController.reset()
+            viewModel.submitSentence(isOnline = isOnline)
+        },
         onSaveCorrectedAsExample = viewModel::saveCorrectedAsExample,
         onRetryFailedSentence = { sentenceId ->
             viewModel.retryFailedSentence(
@@ -67,8 +118,17 @@ fun PracticeRoute(
         },
         onDismissMessage = viewModel::clearMessages,
         isOnline = isOnline,
+        speechState = speechState,
+        onStartVoiceInput = {
+            viewModel.clearVoiceLowConfidenceHint()
+            micPermission.requestPermission()
+        },
+        onStopVoiceInput = speechController::stopListening,
         modifier = modifier
     )
+
+    // Hộp thoại tiếng Việt giải thích quyền Micro và điều hướng Cài đặt ứng dụng khi bị từ chối (Mục 6.7 & 9.5)
+    MicPermissionDeniedDialog(state = micPermission)
 }
 
 /**

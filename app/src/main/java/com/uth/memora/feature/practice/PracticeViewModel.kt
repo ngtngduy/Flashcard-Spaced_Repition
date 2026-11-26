@@ -35,6 +35,7 @@ import kotlinx.coroutines.launch
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.util.Locale
 
 /**
  * ViewModel điều phối màn hình Luyện đặt câu với Chatbot AI (Figma 2061:119 & 2212:109 · Mục 6.7, 6.8, 8.2, 9.5 & 13):
@@ -228,6 +229,7 @@ class PracticeViewModel(
                         selectedCardIndex = resolvedIndex,
                         inputText = if (isCardChanged) "" else current.inputText,
                         validationError = null,
+                        isLowConfidenceVoiceInput = if (isCardChanged) false else current.isLowConfidenceVoiceInput,
                         history = if (isCardChanged) emptyList() else current.history
                     )
                 }
@@ -265,6 +267,7 @@ class PracticeViewModel(
                     validationError = null,
                     errorMessage = null,
                     feedbackMessage = null,
+                    isLowConfidenceVoiceInput = false,
                     history = if (isCardChanged) emptyList() else state.history
                 )
             }
@@ -326,18 +329,32 @@ class PracticeViewModel(
                 inputText = newText,
                 validationError = liveValidationError,
                 errorMessage = null,
-                feedbackMessage = null
+                feedbackMessage = null,
+                isLowConfidenceVoiceInput = false
             )
         }
     }
 
     /**
-     * Nhận văn bản từ Speech-to-Text, tự động viết hoa chữ cái đầu câu và thêm dấu kết câu (Mục 6.7).
+     * Nhận văn bản từ Speech-to-Text, tự động viết hoa chữ cái đầu câu và thêm dấu chấm `.`
+     * nếu chưa kết thúc bằng `.`, `!`, `?` trước khi cập nhật `inputText` (Mục 6.7 & 6.8).
+     * Gắn cờ `isLowConfidenceVoiceInput` nếu độ tin cậy < 0.7f để nhắc người học rà lại trước khi gửi.
      */
-    fun onVoiceInputResult(rawTranscript: String) {
+    fun onVoiceInputResult(
+        rawTranscript: String,
+        lowConfidence: Boolean = false
+    ) {
         val normalized = normalizeVoiceSentence(rawTranscript)
         if (normalized.isEmpty()) return
         onInputTextChange(normalized)
+        if (lowConfidence) {
+            _uiState.update { it.copy(isLowConfidenceVoiceInput = true) }
+        }
+    }
+
+    /** Xóa nhắc nhẹ độ tin cậy giọng nói khi người học bắt đầu phiên ghi âm mới hoặc đã rà xong (Mục 6.7). */
+    fun clearVoiceLowConfidenceHint() {
+        _uiState.update { it.copy(isLowConfidenceVoiceInput = false) }
     }
 
     /**
@@ -400,7 +417,8 @@ class PracticeViewModel(
                     isSubmitting = true,
                     validationError = null,
                     errorMessage = null,
-                    feedbackMessage = null
+                    feedbackMessage = null,
+                    isLowConfidenceVoiceInput = false
                 )
             }
 
@@ -873,7 +891,7 @@ class PracticeViewModel(
             if (collapsed.isEmpty()) return ""
 
             val capitalized = collapsed.replaceFirstChar { first ->
-                if (first.isLowerCase()) first.titlecase() else first.toString()
+                if (first.isLowerCase()) first.titlecase(Locale.US) else first.toString()
             }
             return if (capitalized.last() in SENTENCE_END_PUNCTUATIONS) {
                 capitalized
