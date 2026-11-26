@@ -1,0 +1,149 @@
+[
+  {
+    "id": "prebuilt_oxford_3000",
+    "name": "Oxford 3000 cơ bản",
+    "description": "20 từ tiếng Anh giao tiếp thông dụng nhất",
+    "cards": [
+      {
+        "word": "achieve",
+        "phonetic": "/əˈtʃiːv/",
+        "partOfSpeech": "VERB",
+        "meaning": "Đạt được, hoàn thành mục tiêu sau nhiều nỗ lực",
+        "example": "She worked hard to achieve her career goals."
+      },
+      {
+        "word": "approach",
+        "phonetic": "/əˈprəʊtʃ/",
+        "partOfSpeech": "NOUN",
+        "meaning": "Cách tiếp cận, phương pháp giải quyết vấn đề",
+        "example": "We need a practical approach to solve this technical issue."
+      },
+      {
+        "word": "benefit",
+        "phonetic": "/ˈbenɪfɪt/",
+        "partOfSpeech": "NOUN",
+        "meaning": "Lợi ích, quyền lợi mang lại giá trị tốt",
+        "example": "Regular exercise brings many long-term health benefits."
+      },
+      {
+        "word": "challenge",
+        "phonetic": "/ˈtʃælɪndʒ/",
+        "partOfSpeech": "NOUN",
+        "meaning": "Thử thách, nhiệm vụ khó đòi hỏi quyết tâm",
+        "example": "Learning a new language is always an exciting challenge."
+      },
+      {
+        "word": "communicate",
+        "phonetic": "/kəˈmjuːnɪkeɪt/",
+        "partOfSpeech": "VERB",
+        "meaning": "Giao tiếp, truyền đạt thông tin hoặc cảm xúc",
+        "example": "Good leaders communicate clearly with every team member."
+      },
+      {
+        "word": "confident",
+        "phonetic": "/ˈkɒnfɪdənt/",
+        "partOfSpeech": "ADJECTIVE",
+        "meaning": "Tự tin vào khả năng của bản thân",
+        "example": "Daily practice makes her feel confident during English interviews."
+      },
+      {
+        "word": "consider",
+        "phonetic": "/kənˈsɪdə(r)/",
+        "partOfSpeech": "VERB",
+        "meaning": "Cân nhắc, xem xét kỹ trước khi quyết định",
+        "example": "Please consider all available options before signing the contract."
+      },
+      {
+        "word": "contribute",
+        "phonetic": "/kənˈtrɪbjuːt/",
+        "partOfSpeech": "VERB",
+        "meaning": "Đóng góp công sức, ý tưởng hoặc tài chính",
+        "example": "Everyone is encouraged to contribute ideas during the meeting."
+      },
+      {
+        "word": "convenient",
+        "phonetic": "/kənˈviːniənt/",
+        "partOfSpeech": "ADJECTIVE",
+        "meaning": "Thuận tiện, tiện lợi và tiết kiệm thời gian",
+        "example": "Studying flashcards on a mobile phone is very convenient."
+      },
+      {
+        "word": "effective",
+        "phonetic": "/ɪˈfektɪv/",
+        "partOfSpeech": "ADJECTIVE",
+        "meaning": "Hiệu quả, đem lại kết quả như mong đợi",
+        "example": "Spaced repetition is an effective method for vocabulary retention."
+      },
+      {
+        "word": "encourage",
+        "phonetic": "/ɪnˈkʌrɪdʒ/",
+        "partOfSpeech": "VERB",
+        "meaning": "Khuyến khích, động viên tinh thần",
+        "example": "Teachers always encourage students to write their own examples."
+      },
+      {
+        "word": "essential",
+        "phonetic": "/ɪˈsenʃl/",
+        "partOfSpeech": "ADJECTIVE",
+        "meaning": "Thiết yếu, vô cùng quan trọng và không thể thiếu",
+        "example": "Clear documentation is essential for software maintenance."
+      },
+      {
+        "word": "experience",
+        "phonetic": "/ɪkˈspɪəriəns/",
+        "partOfSpeech": "NOUN",
+        "meaning": "Kinh nghiệm thực tế hoặc trải nghiệm đáng nhớ",
+        "example": "She gained valuable experience while working on the project."
+      },
+      {
+        "word": "flexible",
+        "phonetic": "/ˈfleksəbl/",
+        "partOfSpeech": "ADJECTIVE",
+        "meaning": "Linh hoạt, dễ thích nghi với sự thay đổi",
+        "example": "Our team maintains a flexible schedule during exam weeks."
+      },
+      {
+        "word": "frequent",
+        "phonetic": "/ˈfriːkwənt/",
+        "partOfSpeech": "ADJECTIVE",
+        "meaning": "Thường xuyên, diễn ra đều đặn nhiều lần",
+        "example": "Frequent short reviews work much better than cramming."
+      },
+      {
+        "word": "improve",
+        "phonetic": "/ɪmˈpruːv/",
+        "partOfSpeech": "VERB",
+        "meaning": "Cải thiện, nâng cao chất lượng hoặc kỹ năng",
+        "example": "Reading English articles daily helps improve your vocabulary."
+      },
+      {
+        "word": "maintain",
+        "phonetic": "/meɪnˈteɪn/",
+        "partOfSpeech": "VERB",
+        "meaning": "Duy trì, giữ gìn ở mức ổn định",
+        "example": "It takes discipline to maintain a thirty-day study streak."
+      },
+      {
+        "word": "opportunity",
+        "phonetic": "/ˌɒpəˈtjuːnəti/",
+        "partOfSpeech": "NOUN",
+        "meaning": "Cơ hội thuận lợi để phát triển",
+        "example": "The internship gave him an opportunity to practice real engineering."
+      },
+      {
+        "word": "prepare",
+        "phonetic": "/prɪˈpeə(r)/",
+        "partOfSpeech": "VERB",
+        "meaning": "Chuẩn bị sẵn sàng cho công việc hoặc sự kiện",
+        "example": "They spent two weeks preparing for the final presentation."
+      },
+      {
+        "word": "reliable",
+        "phonetic": "/rɪˈlaɪəbl/",
+        "partOfSpeech": "ADJECTIVE",
+        "meaning": "Đáng tin cậy, hoạt động ổn định và chắc chắn",
+        "example": "Local database storage keeps the app reliable even offline."
+      }
+    ]
+  }
+]
