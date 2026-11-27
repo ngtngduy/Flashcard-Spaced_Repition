@@ -1,6 +1,7 @@
 package com.uth.memora.integration.sync
 
 import android.content.Context
+import android.util.Log
 import androidx.room.withTransaction
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.FirebaseTooManyRequestsException
@@ -8,6 +9,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.storage.FirebaseStorage
+import com.uth.memora.BuildConfig
 import com.uth.memora.core.database.MemoraDatabase
 import com.uth.memora.core.database.dao.DeckDao
 import com.uth.memora.core.database.mapper.toDomain
@@ -876,38 +878,45 @@ class FirestoreCloudSyncManager(
         const val ERROR_SYNC_UNKNOWN_VI: String =
             "Đồng bộ dữ liệu lên đám mây chưa thành công. Vui lòng thử lại sau."
 
+        private const val LOG_TAG: String = "FirestoreCloudSync"
+
         /**
          * Phân loại ngoại lệ Firestore/mạng/429/định dạng dữ liệu sang thông báo tiếng Việt thân thiện (Mục 8.3 & 10.1).
+         * Bảo mật: không giữ `cause` gốc từ Firestore/HTTP để tránh lộ token/header qua stacktrace;
+         * chỉ ghi mã lỗi Firestore và tên class khi `BuildConfig.DEBUG`.
          */
         internal fun mapSyncException(throwable: Throwable): Exception {
+            logDebugSyncFailure(throwable)
             return when (throwable) {
                 is ImageUploader.ImageUploadException -> throwable
 
                 is FirebaseFirestoreException -> when (throwable.code) {
                     FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED ->
-                        Exception(ERROR_RATE_LIMIT_VI, throwable)
+                        Exception(ERROR_RATE_LIMIT_VI)
 
                     FirebaseFirestoreException.Code.UNAVAILABLE,
-                    FirebaseFirestoreException.Code.DEADLINE_EXCEEDED ->
-                        Exception(ERROR_NETWORK_VI, throwable)
+                    FirebaseFirestoreException.Code.DEADLINE_EXCEEDED,
+                    FirebaseFirestoreException.Code.ABORTED,
+                    FirebaseFirestoreException.Code.INTERNAL ->
+                        Exception(ERROR_NETWORK_VI)
 
                     FirebaseFirestoreException.Code.PERMISSION_DENIED,
                     FirebaseFirestoreException.Code.UNAUTHENTICATED ->
-                        Exception(ERROR_PERMISSION_VI, throwable)
+                        Exception(ERROR_PERMISSION_VI)
 
                     FirebaseFirestoreException.Code.INVALID_ARGUMENT,
                     FirebaseFirestoreException.Code.DATA_LOSS,
                     FirebaseFirestoreException.Code.FAILED_PRECONDITION ->
-                        Exception(ERROR_INVALID_FORMAT_VI, throwable)
+                        Exception(ERROR_INVALID_FORMAT_VI)
 
                     else -> mapGenericSyncException(throwable)
                 }
 
                 is FirebaseTooManyRequestsException ->
-                    Exception(ERROR_RATE_LIMIT_VI, throwable)
+                    Exception(ERROR_RATE_LIMIT_VI)
 
                 is FirebaseNetworkException ->
-                    Exception(ERROR_NETWORK_VI, throwable)
+                    Exception(ERROR_NETWORK_VI)
 
                 else -> mapGenericSyncException(throwable)
             }
@@ -927,7 +936,7 @@ class FirestoreCloudSyncManager(
                 combinedMessage.contains("too many requests") ||
                 combinedMessage.contains("quota")
             ) {
-                return Exception(ERROR_RATE_LIMIT_VI, throwable)
+                return Exception(ERROR_RATE_LIMIT_VI)
             }
 
             if (
@@ -939,7 +948,7 @@ class FirestoreCloudSyncManager(
                 combinedMessage.contains("timeout") ||
                 combinedMessage.contains("timed out")
             ) {
-                return Exception(ERROR_NETWORK_VI, throwable)
+                return Exception(ERROR_NETWORK_VI)
             }
 
             if (
@@ -948,10 +957,22 @@ class FirestoreCloudSyncManager(
                 combinedMessage.contains("invalid_argument") ||
                 combinedMessage.contains("format")
             ) {
-                return Exception(ERROR_INVALID_FORMAT_VI, throwable)
+                return Exception(ERROR_INVALID_FORMAT_VI)
             }
 
-            return Exception(ERROR_SYNC_UNKNOWN_VI, throwable)
+            return Exception(ERROR_SYNC_UNKNOWN_VI)
+        }
+
+        /**
+         * Chỉ ghi mã lỗi Firestore và tên class khi `BuildConfig.DEBUG == true`; tuyệt đối không in header hay token.
+         */
+        private fun logDebugSyncFailure(throwable: Throwable) {
+            if (!BuildConfig.DEBUG) return
+            val firestoreCode = (throwable as? FirebaseFirestoreException)?.code?.name ?: "NONE"
+            val className = throwable::class.java.simpleName.ifBlank { "Throwable" }
+            runCatching {
+                Log.w(LOG_TAG, "cloudSync failed [code=$firestoreCode, class=$className]")
+            }
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.uth.memora.integration.ai
 
+import android.util.Log
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.GoogleGenerativeAIException
 import com.uth.memora.BuildConfig
@@ -127,21 +128,21 @@ sealed class AiAutoFillException(
 
     companion object {
         const val ERROR_BLANK_WORD_VI: String =
-            "Vui lòng nhập một từ tiếng Anh trước khi dùng gợi ý AI."
+            "Vui lòng nhập một từ tiếng Anh trước khi dùng AI gợi ý nhé."
         const val ERROR_MISSING_API_KEY_VI: String =
-            "Chưa cấu hình khóa API Gemini. Vui lòng kiểm tra cấu hình ứng dụng."
+            "Tính năng AI gợi ý hiện chưa sẵn sàng. Bạn có thể tự nhập thông tin thẻ nhé."
         const val ERROR_INVALID_API_KEY_VI: String =
-            "Khóa API Gemini không hợp lệ hoặc không có quyền truy cập."
+            "Không thể kết nối tới trợ lý AI lúc này. Bạn thử lại sau hoặc tự nhập thông tin thẻ nhé."
         const val ERROR_NETWORK_VI: String =
-            "Không có kết nối mạng hoặc đường truyền không ổn định. Vui lòng kiểm tra mạng và thử lại."
+            "Không có kết nối mạng. Hãy kiểm tra Wi-Fi/4G rồi thử gợi ý lại hoặc tự nhập thẻ nhé."
         const val ERROR_RATE_LIMIT_VI: String =
-            "Hệ thống AI đã chạm giới hạn lượt gọi (429). Vui lòng đợi một lát rồi thử lại."
+            "Trợ lý AI đang bận do có nhiều lượt yêu cầu. Bạn đợi một lát rồi thử gợi ý lại hoặc tự nhập thẻ nhé."
         const val ERROR_TIMEOUT_VI: String =
-            "AI phản hồi quá thời gian cho phép (10 giây). Vui lòng thử gợi ý lại sau."
+            "AI phản hồi hơi lâu. Bạn kiểm tra mạng rồi thử gợi ý lại hoặc tự nhập thẻ nhé."
         const val ERROR_INVALID_JSON_VI: String =
-            "Phản hồi từ AI không đúng định dạng JSON chuẩn. Vui lòng thử gợi ý lại."
+            "Kết quả gợi ý từ AI chưa đọc được. Bạn thử bấm gợi ý lại hoặc tự nhập thông tin thẻ nhé."
         const val ERROR_UNKNOWN_VI: String =
-            "Không thể gợi ý thông tin thẻ bằng AI lúc này. Vui lòng thử lại sau."
+            "Chưa thể gợi ý thông tin thẻ lúc này. Bạn thử lại sau hoặc tự nhập giúp mình nhé."
     }
 }
 
@@ -205,25 +206,20 @@ class GeminiCardAutoFillService internal constructor(
                 }
             }
         } catch (e: TimeoutCancellationException) {
-            return Result.failure(AiAutoFillException.Timeout(cause = e))
+            return Result.failure(mapToAutoFillException(e))
         } catch (e: CancellationException) {
             // Không nuốt tín hiệu hủy coroutine có chủ đích từ ViewModel
             throw e
         } catch (e: SocketTimeoutException) {
-            return Result.failure(AiAutoFillException.Timeout(cause = e))
+            return Result.failure(mapToAutoFillException(e))
         } catch (e: UnknownHostException) {
-            return Result.failure(AiAutoFillException.NetworkUnavailable(cause = e))
+            return Result.failure(mapToAutoFillException(e))
         } catch (e: IOException) {
             return Result.failure(mapToAutoFillException(e))
         } catch (e: AiJsonParseException) {
-            return Result.failure(
-                AiAutoFillException.InvalidJsonFormat(
-                    message = e.message ?: AiAutoFillException.ERROR_INVALID_JSON_VI,
-                    cause = e
-                )
-            )
+            return Result.failure(mapToAutoFillException(e))
         } catch (e: JSONException) {
-            return Result.failure(AiAutoFillException.InvalidJsonFormat(cause = e))
+            return Result.failure(mapToAutoFillException(e))
         } catch (e: GoogleGenerativeAIException) {
             return Result.failure(mapToAutoFillException(e))
         } catch (e: Exception) {
@@ -237,12 +233,7 @@ class GeminiCardAutoFillService internal constructor(
         ).fold(
             onSuccess = { Result.success(it) },
             onFailure = { error ->
-                Result.failure(
-                    AiAutoFillException.InvalidJsonFormat(
-                        message = error.message ?: AiAutoFillException.ERROR_INVALID_JSON_VI,
-                        cause = error
-                    )
-                )
+                Result.failure(mapToAutoFillException(error))
             }
         )
     }
@@ -251,101 +242,121 @@ class GeminiCardAutoFillService internal constructor(
         "GeminiCardAutoFillService(modelProvider=$modelProvider, timeoutMillis=$timeoutMillis)"
 
     companion object {
+        private const val LOG_TAG: String = "GeminiCardAutoFill"
+
         /** Thời gian chờ tối đa 10 giây cho gợi ý tự điền thẻ bằng AI (Mục 11). */
         const val REQUEST_TIMEOUT_MILLIS: Long = 10_000L
 
         /**
          * Phân loại ngoại lệ phát sinh trong quá trình gọi Gemini AI sang [AiAutoFillException]
          * kèm thông báo tiếng Việt thân thiện (Mục 6.3, 9.5 & 11).
+         *
+         * Bảo mật: không giữ `cause` gốc từ SDK/HTTP để tránh rò rỉ `GEMINI_API_KEY`
+         * hay HTTP header qua stacktrace/Logcat; chỉ ghi mã lỗi & tên class khi `BuildConfig.DEBUG`.
          */
         internal fun mapToAutoFillException(throwable: Throwable): AiAutoFillException {
             if (throwable is AiAutoFillException) return throwable
 
             val causeChain = generateSequence(throwable) { it.cause }.toList()
-            val className = throwable::class.java.simpleName
+            val className = throwable::class.java.simpleName.ifBlank { "Throwable" }
             val combinedMessage = causeChain
                 .mapNotNull { it.message }
                 .joinToString(separator = " ")
                 .lowercase()
 
-            // 1. Timeout (withTimeout 10s hoặc SocketTimeoutException từ tầng mạng)
-            if (
+            val mapped: AiAutoFillException = when {
+                // 1. Timeout (withTimeout 10s hoặc SocketTimeoutException từ tầng mạng)
                 throwable is TimeoutCancellationException ||
-                causeChain.any { it is SocketTimeoutException }
-            ) {
-                return AiAutoFillException.Timeout(cause = throwable)
-            }
+                    causeChain.any { it is SocketTimeoutException } ->
+                    AiAutoFillException.Timeout()
 
-            // 2. Mất mạng / không phân giải được tên miền (UnknownHostException)
-            if (causeChain.any { it is UnknownHostException }) {
-                return AiAutoFillException.NetworkUnavailable(cause = throwable)
-            }
+                // 2. Mất mạng / không phân giải được tên miền (UnknownHostException)
+                causeChain.any { it is UnknownHostException } ->
+                    AiAutoFillException.NetworkUnavailable()
 
-            // 3. Lỗi phân tích JSON sai định dạng
-            if (
-                throwable is AiJsonParseException ||
-                causeChain.any { it is JSONException }
-            ) {
-                return AiAutoFillException.InvalidJsonFormat(
-                    message = throwable.message ?: AiAutoFillException.ERROR_INVALID_JSON_VI,
-                    cause = throwable
-                )
-            }
+                // 3. Lỗi phân tích JSON sai định dạng (chỉ giữ thông điệp tiếng Việt của AiJsonParseException)
+                throwable is AiJsonParseException ->
+                    AiAutoFillException.InvalidJsonFormat(
+                        message = throwable.message ?: AiAutoFillException.ERROR_INVALID_JSON_VI
+                    )
 
-            // 4. Lỗi hết hạn mức / giới hạn tốc độ gọi HTTP 429 (Quota / Rate limit)
-            if (
+                causeChain.any { it is JSONException } ->
+                    AiAutoFillException.InvalidJsonFormat()
+
+                // 4. Lỗi hết hạn mức / giới hạn tốc độ gọi HTTP 429 (Quota / Rate limit)
                 className.contains("Quota", ignoreCase = true) ||
-                combinedMessage.contains("429") ||
-                combinedMessage.contains("resource_exhausted") ||
-                combinedMessage.contains("quota") ||
-                combinedMessage.contains("rate limit") ||
-                combinedMessage.contains("too many requests")
-            ) {
-                return AiAutoFillException.RateLimited(cause = throwable)
-            }
+                    combinedMessage.contains("429") ||
+                    combinedMessage.contains("resource_exhausted") ||
+                    combinedMessage.contains("quota") ||
+                    combinedMessage.contains("rate limit") ||
+                    combinedMessage.contains("too many requests") ->
+                    AiAutoFillException.RateLimited()
 
-            // 5. Lỗi khóa API không hợp lệ hoặc không có quyền (401 / 403)
-            if (
+                // 5. Lỗi khóa API không hợp lệ hoặc không có quyền (401 / 403)
                 className.contains("InvalidAPIKey", ignoreCase = true) ||
-                combinedMessage.contains("api key") ||
-                combinedMessage.contains("api_key") ||
-                combinedMessage.contains("401") ||
-                combinedMessage.contains("403") ||
-                combinedMessage.contains("unauthenticated") ||
-                combinedMessage.contains("permission_denied")
-            ) {
-                return AiAutoFillException.InvalidApiKey(cause = throwable)
-            }
+                    combinedMessage.contains("api key") ||
+                    combinedMessage.contains("api_key") ||
+                    combinedMessage.contains("401") ||
+                    combinedMessage.contains("403") ||
+                    combinedMessage.contains("unauthenticated") ||
+                    combinedMessage.contains("permission_denied") ->
+                    AiAutoFillException.InvalidApiKey()
 
-            // 6. Lỗi mất mạng / gián đoạn đường truyền (IOException hoặc lỗi kết nối tương đương)
-            if (
+                // 6. Lỗi mất mạng / gián đoạn đường truyền (IOException, SSL, HTTP 5xx hoặc lỗi kết nối tương đương)
                 causeChain.any { it is IOException } ||
-                combinedMessage.contains("unable to resolve host") ||
-                combinedMessage.contains("no address associated") ||
-                combinedMessage.contains("failed to connect") ||
-                combinedMessage.contains("connection refused") ||
-                combinedMessage.contains("network") ||
-                combinedMessage.contains("socket")
-            ) {
-                return AiAutoFillException.NetworkUnavailable(cause = throwable)
+                    className.contains("UnknownHost", ignoreCase = true) ||
+                    className.contains("ConnectException", ignoreCase = true) ||
+                    className.contains("SSL", ignoreCase = true) ||
+                    combinedMessage.contains("unknownhost") ||
+                    combinedMessage.contains("unable to resolve host") ||
+                    combinedMessage.contains("no address associated") ||
+                    combinedMessage.contains("failed to connect") ||
+                    combinedMessage.contains("connection refused") ||
+                    combinedMessage.contains("connection reset") ||
+                    combinedMessage.contains("broken pipe") ||
+                    combinedMessage.contains("service unavailable") ||
+                    combinedMessage.contains("bad gateway") ||
+                    combinedMessage.contains("http 500") ||
+                    combinedMessage.contains("http 502") ||
+                    combinedMessage.contains("http 503") ||
+                    combinedMessage.contains("http 504") ||
+                    combinedMessage.contains("network") ||
+                    combinedMessage.contains("socket") ->
+                    AiAutoFillException.NetworkUnavailable()
+
+                // 7. Lỗi timeout được báo qua thông điệp từ SDK
+                className.contains("Timeout", ignoreCase = true) ||
+                    combinedMessage.contains("timed out") ||
+                    combinedMessage.contains("timeout") ||
+                    combinedMessage.contains("deadline_exceeded") ->
+                    AiAutoFillException.Timeout()
+
+                // 8. Lỗi phản hồi bị chặn hoặc sai cấu trúc dữ liệu từ phía Gemini SDK
+                className.contains("Json", ignoreCase = true) ||
+                    className.contains("Serialization", ignoreCase = true) ||
+                    className.contains("ResponseStopped", ignoreCase = true) ||
+                    className.contains("PromptBlocked", ignoreCase = true) ||
+                    combinedMessage.contains("json") ||
+                    combinedMessage.contains("malformed") ||
+                    combinedMessage.contains("unexpected token") ||
+                    combinedMessage.contains("unexpected end") ->
+                    AiAutoFillException.InvalidJsonFormat()
+
+                else -> AiAutoFillException.Unknown()
             }
 
-            // 7. Lỗi timeout được báo qua thông điệp từ SDK
-            if (combinedMessage.contains("timed out") || combinedMessage.contains("timeout")) {
-                return AiAutoFillException.Timeout(cause = throwable)
-            }
+            logDebugFailure(errorType = mapped.type, causeClassName = className)
+            return mapped
+        }
 
-            // 8. Lỗi phản hồi bị chặn hoặc sai cấu trúc dữ liệu từ phía Gemini SDK
-            if (
-                className.contains("Serialization", ignoreCase = true) ||
-                className.contains("ResponseStopped", ignoreCase = true) ||
-                className.contains("PromptBlocked", ignoreCase = true) ||
-                combinedMessage.contains("json")
-            ) {
-                return AiAutoFillException.InvalidJsonFormat(cause = throwable)
+        private fun logDebugFailure(
+            errorType: AiAutoFillErrorType,
+            causeClassName: String
+        ) {
+            if (!BuildConfig.DEBUG) return
+            runCatching {
+                Log.w(LOG_TAG, "autoFillCard failed [type=$errorType, class=$causeClassName]")
             }
-
-            return AiAutoFillException.Unknown(cause = throwable)
         }
     }
 }

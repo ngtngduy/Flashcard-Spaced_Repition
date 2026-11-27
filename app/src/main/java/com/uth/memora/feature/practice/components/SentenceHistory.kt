@@ -42,7 +42,9 @@ import com.uth.memora.core.model.PracticeSentence
 import com.uth.memora.core.model.SentenceStatus
 import com.uth.memora.feature.common.MemoraSectionCard
 import com.uth.memora.feature.common.MemoraStatusBadge
+import com.uth.memora.feature.practice.PracticeViewModel
 import com.uth.memora.feature.theme.MemoraTheme
+import com.uth.memora.integration.worker.SentenceGradingWorker
 import com.uth.memora.feature.theme.StatusSuccess
 import com.uth.memora.feature.theme.StatusSuccessLight
 import com.uth.memora.feature.theme.StatusWarning
@@ -249,8 +251,10 @@ private fun SentenceHistoryItem(
 
             SentenceStatus.PENDING_GRADE -> {
                 Spacer(modifier = Modifier.height(8.dp))
-                val pendingMessage = sentence.errorMessage?.takeIf { it.isNotBlank() }
-                    ?: "Đã lưu vào hàng đợi ngoại tuyến — sẽ tự động chấm khi có mạng trở lại."
+                val pendingMessage = PracticeViewModel.sanitizeUserFacingErrorMessage(
+                    rawMessage = sentence.errorMessage,
+                    fallback = "Đã lưu vào hàng đợi ngoại tuyến — sẽ tự động chấm khi có mạng trở lại."
+                )
                 Text(
                     text = pendingMessage,
                     style = MaterialTheme.typography.bodySmall,
@@ -268,10 +272,12 @@ private fun SentenceHistoryItem(
             }
 
             SentenceStatus.GRADE_ERROR -> {
-                // Thông báo lỗi tiếng Việt rõ ràng kèm nút "Chấm lại" (Figma 2212:104..108 · Mục 8.2 & 9.5)
+                // Thông báo lỗi tiếng Việt rõ ràng, lọc sạch chuỗi kỹ thuật thô, kèm nút "Chấm lại" (Figma 2212:104..108 · Mục 8.2 & 9.5)
                 Spacer(modifier = Modifier.height(10.dp))
-                val errorText = sentence.errorMessage?.takeIf { it.isNotBlank() }
-                    ?: "Chưa thể chấm câu lúc này, bạn bấm Chấm lại nhé."
+                val errorText = PracticeViewModel.sanitizeUserFacingErrorMessage(
+                    rawMessage = sentence.errorMessage,
+                    fallback = SentenceGradingWorker.ERROR_GRADE_FAILED_VI
+                )
 
                 Surface(
                     modifier = Modifier.fillMaxWidth(),

@@ -8,11 +8,13 @@ import android.graphics.Color
 import android.graphics.Matrix
 import android.media.ExifInterface
 import android.net.Uri
+import android.util.Log
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.FirebaseTooManyRequestsException
 import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.storage.StorageException
 import com.google.firebase.storage.StorageMetadata
+import com.uth.memora.BuildConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -270,9 +272,11 @@ class ImageUploader(
                 }
             }
         } catch (e: SecurityException) {
-            throw LocalImageUnavailableException(ERROR_IMAGE_PERMISSION_VI, e)
+            logDebugUploadFailure(e)
+            throw LocalImageUnavailableException(ERROR_IMAGE_PERMISSION_VI)
         } catch (e: FileNotFoundException) {
-            throw LocalImageUnavailableException(ERROR_IMAGE_NOT_FOUND_VI, e)
+            logDebugUploadFailure(e)
+            throw LocalImageUnavailableException(ERROR_IMAGE_NOT_FOUND_VI)
         }
     }
 
@@ -365,33 +369,38 @@ class ImageUploader(
             return scaledWidth to scaledHeight
         }
 
+        private const val LOG_TAG: String = "ImageUploader"
+
         /**
          * Chuẩn hóa lỗi tải ảnh Firebase Storage / mạng / 429 sang thông báo tiếng Việt thân thiện (Mục 10.1).
+         * Bảo mật: không giữ `cause` gốc từ Storage/HTTP để tránh lộ URL token hay header qua stacktrace;
+         * chỉ ghi mã lỗi Storage và tên class khi `BuildConfig.DEBUG`.
          */
         internal fun mapUploadException(throwable: Throwable): Exception {
+            logDebugUploadFailure(throwable)
             return when (throwable) {
                 is LocalImageUnavailableException -> throwable
                 is ImageUploadException -> throwable
 
                 is StorageException -> when (throwable.errorCode) {
                     StorageException.ERROR_QUOTA_EXCEEDED ->
-                        ImageUploadException(ERROR_RATE_LIMIT_VI, throwable)
+                        ImageUploadException(ERROR_RATE_LIMIT_VI)
 
                     StorageException.ERROR_RETRY_LIMIT_EXCEEDED ->
-                        ImageUploadException(ERROR_NETWORK_VI, throwable)
+                        ImageUploadException(ERROR_NETWORK_VI)
 
                     StorageException.ERROR_NOT_AUTHENTICATED,
                     StorageException.ERROR_NOT_AUTHORIZED ->
-                        ImageUploadException(ERROR_PERMISSION_VI, throwable)
+                        ImageUploadException(ERROR_PERMISSION_VI)
 
                     else -> mapGenericUploadException(throwable)
                 }
 
                 is FirebaseTooManyRequestsException ->
-                    ImageUploadException(ERROR_RATE_LIMIT_VI, throwable)
+                    ImageUploadException(ERROR_RATE_LIMIT_VI)
 
                 is FirebaseNetworkException ->
-                    ImageUploadException(ERROR_NETWORK_VI, throwable)
+                    ImageUploadException(ERROR_NETWORK_VI)
 
                 else -> mapGenericUploadException(throwable)
             }
@@ -410,7 +419,7 @@ class ImageUploader(
                 combinedMessage.contains("too many requests") ||
                 combinedMessage.contains("resource_exhausted")
             ) {
-                return ImageUploadException(ERROR_RATE_LIMIT_VI, throwable)
+                return ImageUploadException(ERROR_RATE_LIMIT_VI)
             }
 
             if (
@@ -421,10 +430,22 @@ class ImageUploader(
                 combinedMessage.contains("timeout") ||
                 combinedMessage.contains("timed out")
             ) {
-                return ImageUploadException(ERROR_NETWORK_VI, throwable)
+                return ImageUploadException(ERROR_NETWORK_VI)
             }
 
-            return ImageUploadException(ERROR_UPLOAD_UNKNOWN_VI, throwable)
+            return ImageUploadException(ERROR_UPLOAD_UNKNOWN_VI)
+        }
+
+        /**
+         * Chỉ ghi mã lỗi Storage và tên class khi `BuildConfig.DEBUG == true`; không in URL token hay header.
+         */
+        private fun logDebugUploadFailure(throwable: Throwable) {
+            if (!BuildConfig.DEBUG) return
+            val storageCode = (throwable as? StorageException)?.errorCode?.toString() ?: "NONE"
+            val className = throwable::class.java.simpleName.ifBlank { "Throwable" }
+            runCatching {
+                Log.w(LOG_TAG, "uploadCardImage failed [errorCode=$storageCode, class=$className]")
+            }
         }
     }
 }

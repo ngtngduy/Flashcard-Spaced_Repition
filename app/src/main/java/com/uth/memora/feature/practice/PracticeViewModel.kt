@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.json.JSONException
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -764,7 +765,10 @@ class PracticeViewModel(
                     it.copy(
                         isSubmitting = false,
                         inputText = "",
-                        feedbackMessage = savedSentence.errorMessage ?: MESSAGE_SAVED_OFFLINE_VI
+                        feedbackMessage = sanitizeUserFacingErrorMessage(
+                            rawMessage = savedSentence.errorMessage,
+                            fallback = MESSAGE_SAVED_OFFLINE_VI
+                        )
                     )
                 }
             }
@@ -803,63 +807,18 @@ class PracticeViewModel(
 
     /**
      * Phân loại ngoại lệ mạng / HTTP 429 / timeout / sai JSON thành thông báo tiếng Việt thân thiện,
-     * tuyệt đối không lộ thông tin nhạy cảm hay API key (Mục 9.5).
+     * tuyệt đối không lộ thông tin nhạy cảm, API key hay lỗi kỹ thuật tiếng Anh thô (Mục 9.5).
      */
     private fun mapErrorToVietnamese(
         throwable: Throwable,
         fallback: String = AiGradingException.ERROR_UNKNOWN_VI
-    ): String {
-        if (throwable is AiGradingException) {
-            return throwable.message
-        }
-        if (throwable is AiJsonParseException) {
-            return throwable.message ?: AiGradingException.ERROR_INVALID_JSON_VI
-        }
+    ): String = mapThrowableToUserMessage(throwable = throwable, fallback = fallback)
 
-        val causeChain = generateSequence(throwable) { it.cause }.toList()
-        val combinedLower = causeChain
-            .mapNotNull { it.message }
-            .joinToString(" ")
-            .lowercase()
-
-        val shouldDelegateToAiClassifier =
-            throwable is TimeoutCancellationException ||
-                causeChain.any {
-                    it is UnknownHostException ||
-                        it is SocketTimeoutException ||
-                        it is IOException ||
-                        it is AiJsonParseException
-                } ||
-                combinedLower.contains("429") ||
-                combinedLower.contains("quota") ||
-                combinedLower.contains("rate limit") ||
-                combinedLower.contains("resource_exhausted") ||
-                combinedLower.contains("too many requests") ||
-                combinedLower.contains("api key") ||
-                combinedLower.contains("api_key") ||
-                combinedLower.contains("unauthenticated") ||
-                combinedLower.contains("permission_denied") ||
-                combinedLower.contains("json") ||
-                combinedLower.contains("timeout") ||
-                combinedLower.contains("timed out") ||
-                combinedLower.contains("unable to resolve host") ||
-                combinedLower.contains("failed to connect")
-
-        if (shouldDelegateToAiClassifier) {
-            return GeminiAiGradingService.mapToGradingException(throwable).message
-        }
-
-        val rawMessage = throwable.message?.trim().orEmpty()
-        return rawMessage.ifEmpty { fallback }
-    }
-
-    private fun normalizeStoredErrorMessage(rawErrorMessage: String?): String {
-        val clean = rawErrorMessage?.trim().orEmpty()
-        if (clean.isEmpty()) {
-            return SentenceGradingWorker.ERROR_GRADE_FAILED_VI
-        }
-        return mapErrorToVietnamese(RuntimeException(clean), fallback = clean)
-    }
+    private fun normalizeStoredErrorMessage(rawErrorMessage: String?): String =
+        sanitizeUserFacingErrorMessage(
+            rawMessage = rawErrorMessage,
+            fallback = SentenceGradingWorker.ERROR_GRADE_FAILED_VI
+        )
 
     private fun isTransientNetworkOrTimeout(throwable: Throwable): Boolean {
         val mapped = GeminiAiGradingService.mapToGradingException(throwable)
@@ -882,6 +841,131 @@ class PracticeViewModel(
             "Câu này đang ở trạng thái Chờ chấm hoặc Đang chấm, vui lòng đợi kết quả."
 
         private val SENTENCE_END_PUNCTUATIONS = setOf('.', '!', '?')
+        private val VIETNAMESE_DIACRITIC_REGEX = Regex("[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]", RegexOption.IGNORE_CASE)
+        private val JAVA_EXCEPTION_CLASS_REGEX = Regex("\\b[A-Z][A-Za-z0-9_]*Exception\\b")
+        private val TECHNICAL_ERROR_KEYWORDS = listOf(
+            "exception:",
+            "error:",
+            "throwable",
+            "json",
+            "http ",
+            "429",
+            "401",
+            "403",
+            "500",
+            "502",
+            "503",
+            "504",
+            "unknownhost",
+            "sockettimeout",
+            "timeout",
+            "timed out",
+            "unable to resolve host",
+            "failed to connect",
+            "connection refused",
+            "connection reset",
+            "broken pipe",
+            "sslhandshake",
+            "resource_exhausted",
+            "rate limit",
+            "too many requests",
+            "quota",
+            "api key",
+            "api_key",
+            "unauthenticated",
+            "permission_denied",
+            "serialization",
+            "malformed",
+            "unexpected end",
+            "unexpected token",
+            "java.",
+            "kotlin.",
+            "android.",
+            "org.json",
+            "com.google",
+            "okhttp",
+            "ktor",
+            "sqlite",
+            "nullpointer",
+            "illegalstate",
+            "illegalargument"
+        )
+
+        /**
+         * Chuyển mọi ngoại lệ (kể cả lỗi kỹ thuật thô từ SDK/mạng/JSON) sang thông báo tiếng Việt thân thiện
+         * kèm hướng dẫn hành động tiếp theo cho người học (Mục 9.5).
+         */
+        internal fun mapThrowableToUserMessage(
+            throwable: Throwable,
+            fallback: String = AiGradingException.ERROR_UNKNOWN_VI
+        ): String {
+            if (throwable is AiGradingException) {
+                return sanitizeUserFacingErrorMessage(throwable.message, fallback)
+            }
+            if (throwable is AiJsonParseException) {
+                return sanitizeUserFacingErrorMessage(
+                    throwable.message,
+                    AiGradingException.ERROR_INVALID_JSON_VI
+                )
+            }
+
+            val causeChain = generateSequence(throwable) { it.cause }.toList()
+            val mappedAi = GeminiAiGradingService.mapToGradingException(throwable)
+            if (mappedAi.type != AiGradingErrorType.UNKNOWN) {
+                return mappedAi.message
+            }
+
+            if (
+                throwable is TimeoutCancellationException ||
+                causeChain.any {
+                    it is UnknownHostException ||
+                        it is SocketTimeoutException ||
+                        it is IOException ||
+                        it is JSONException ||
+                        it is AiJsonParseException
+                }
+            ) {
+                return mappedAi.message
+            }
+
+            return sanitizeUserFacingErrorMessage(throwable.message, fallback)
+        }
+
+        /**
+         * Chặn triệt để chuỗi lỗi kỹ thuật tiếng Anh thô (từ ngoại lệ hoặc bản ghi cũ lưu trong Room)
+         * trước khi hiển thị trên `PracticeScreen` và `SentenceHistory` (Mục 9.5).
+         */
+        internal fun sanitizeUserFacingErrorMessage(
+            rawMessage: String?,
+            fallback: String = AiGradingException.ERROR_UNKNOWN_VI
+        ): String {
+            val clean = rawMessage?.trim().orEmpty()
+            if (clean.isEmpty()) return fallback
+
+            if (looksLikeTechnicalError(clean)) {
+                val mappedAi = GeminiAiGradingService.mapToGradingException(RuntimeException(clean))
+                return if (mappedAi.type != AiGradingErrorType.UNKNOWN) {
+                    mappedAi.message
+                } else {
+                    fallback
+                }
+            }
+
+            return clean
+        }
+
+        internal fun looksLikeTechnicalError(message: String): Boolean {
+            if (JAVA_EXCEPTION_CLASS_REGEX.containsMatchIn(message)) {
+                return true
+            }
+            val lower = message.lowercase(Locale.ROOT)
+            if (TECHNICAL_ERROR_KEYWORDS.any { keyword -> lower.contains(keyword) }) {
+                return true
+            }
+            // Nếu thông báo hoàn toàn không có dấu tiếng Việt và chứa chữ cái Latin -> coi là chuỗi kỹ thuật/tiếng Anh thô
+            val hasAsciiLetters = message.any { it in 'A'..'Z' || it in 'a'..'z' }
+            return hasAsciiLetters && !VIETNAMESE_DIACRITIC_REGEX.containsMatchIn(message)
+        }
 
         /**
          * Chuẩn hóa văn bản nhận từ giọng nói: viết hoa ký tự đầu và đảm bảo dấu kết câu (Mục 6.7).
