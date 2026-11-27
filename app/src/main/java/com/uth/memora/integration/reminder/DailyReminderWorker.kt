@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -21,6 +22,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.uth.memora.MainActivity
 import com.uth.memora.MemoraApplication
+import com.uth.memora.core.sm2.LearningDayCalculator
 import kotlinx.coroutines.CancellationException
 
 /**
@@ -30,7 +32,9 @@ import kotlinx.coroutines.CancellationException
  * Tác vụ nền WorkManager chịu trách nhiệm hiển thị thông báo nhắc ôn tập hằng ngày:
  * - Khởi tạo kênh thông báo `NotificationChannel` (Android 8+) tên "Nhắc học Memora".
  * - Kiểm tra an toàn quyền `POST_NOTIFICATIONS` trên Android 13+ (chưa cấp quyền thì bỏ qua, không crash).
- * - Đếm số thẻ đến hạn hôm nay qua `StudySessionRepository.getDueReviewQueue(null)` (không chạm trực tiếp DB).
+ * - Kiểm tra ngày học nhắc gần nhất trong preferences riêng của module để bảo đảm tối đa 1 thông báo/ngày (Mục 6.10).
+ * - Truy vấn cả thẻ đến hạn (`getDueReviewQueue(null)`) và thẻ mới còn lại hôm nay (`getNewCardsQueue(null)`);
+ *   nếu cả hai đều `<= 0` thì bỏ qua để không làm phiền người học đã hoàn thành mục tiêu hôm nay.
  * - Đính kèm `PendingIntent` mở thẳng `MainActivity` vào màn Ôn tập thẻ đến hạn (`StudyMode.DUE_REVIEW`).
  */
 class DailyReminderWorker(
@@ -60,6 +64,20 @@ class DailyReminderWorker(
             )
         }
 
+        // Bảo đảm tối đa 1 thông báo mỗi ngày học (mốc 04:00 sáng theo LearningDayCalculator - Mục 6.10)
+        val todayLearningDay = LearningDayCalculator.toLearningDay()
+        val ignoreDailyLimit = inputData.getBoolean(KEY_IGNORE_DAILY_LIMIT_FOR_TEST, false)
+        val lastRemindedLearningDay = getLastRemindedLearningDay(applicationContext)
+        if (!ignoreDailyLimit && hasAlreadyRemindedToday(lastRemindedLearningDay, todayLearningDay)) {
+            return Result.success(
+                workDataOf(
+                    KEY_NOTIFICATION_SHOWN to false,
+                    KEY_LAST_REMINDED_LEARNING_DAY to todayLearningDay,
+                    KEY_SKIP_REASON to SKIP_REASON_ALREADY_REMINDED_TODAY
+                )
+            )
+        }
+
         // Tạo sẵn NotificationChannel trên Android 8+ (idempotent, an toàn khi chưa có quyền) (Mục 10.3)
         ensureNotificationChannel(applicationContext)
 
@@ -80,18 +98,33 @@ class DailyReminderWorker(
             )
         }
 
-        // Đếm số thẻ đang đến hạn ôn tập hôm nay qua StudySessionRepository (Mục 6.6 & 10.3)
-        val dueCardsCount = try {
-            container.studySessionRepository.getDueReviewQueue(deckId = null).size
+        // Truy vấn cả thẻ đến hạn ôn tập và thẻ mới còn lại trong hạn mức hôm nay (Mục 6.5, 6.6 & 6.10)
+        val (dueCardsCount, remainingNewCardsToday) = try {
+            val dueCount = container.studySessionRepository.getDueReviewQueue(deckId = null).size
+            val newCardsCount = container.studySessionRepository.getNewCardsQueue(deckId = null).size
+            dueCount to newCardsCount
         } catch (e: CancellationException) {
             throw e
         } catch (_: Throwable) {
             return retryOrFail()
         }
 
+        // Không bắn thông báo nếu người học đã hoàn thành hết thẻ cần ôn và thẻ mới hôm nay (Mục 6.10)
+        if (!shouldNotifyForCardCounts(dueCardsCount, remainingNewCardsToday)) {
+            return Result.success(
+                workDataOf(
+                    KEY_NOTIFICATION_SHOWN to false,
+                    KEY_DUE_CARDS_COUNT to dueCardsCount,
+                    KEY_NEW_CARDS_COUNT to remainingNewCardsToday,
+                    KEY_SKIP_REASON to SKIP_REASON_DAILY_GOAL_COMPLETED
+                )
+            )
+        }
+
         val notification = buildReminderNotification(
             context = applicationContext,
-            dueCardsCount = dueCardsCount
+            dueCardsCount = dueCardsCount,
+            remainingNewCardsToday = remainingNewCardsToday
         )
 
         val posted = postNotificationSafely(
@@ -100,10 +133,14 @@ class DailyReminderWorker(
         )
 
         return if (posted) {
+            // Lưu mốc ngày học vừa nhắc để tránh bắn trùng thông báo lần thứ 2 trong cùng ngày (Mục 6.10)
+            saveLastRemindedLearningDay(applicationContext, todayLearningDay)
             Result.success(
                 workDataOf(
                     KEY_NOTIFICATION_SHOWN to true,
-                    KEY_DUE_CARDS_COUNT to dueCardsCount
+                    KEY_DUE_CARDS_COUNT to dueCardsCount,
+                    KEY_NEW_CARDS_COUNT to remainingNewCardsToday,
+                    KEY_LAST_REMINDED_LEARNING_DAY to todayLearningDay
                 )
             )
         } else {
@@ -142,11 +179,20 @@ class DailyReminderWorker(
 
         const val KEY_NOTIFICATION_SHOWN: String = "notification_shown"
         const val KEY_DUE_CARDS_COUNT: String = "due_cards_count"
+        const val KEY_NEW_CARDS_COUNT: String = "new_cards_count"
+        const val KEY_LAST_REMINDED_LEARNING_DAY: String = "last_reminded_learning_day"
         const val KEY_SKIP_REASON: String = "skip_reason"
+        const val KEY_IGNORE_DAILY_LIMIT_FOR_TEST: String = "ignore_daily_limit_for_test"
 
         const val SKIP_REASON_REMINDER_DISABLED: String = "reminder_disabled"
+        const val SKIP_REASON_ALREADY_REMINDED_TODAY: String = "already_reminded_today"
         const val SKIP_REASON_PERMISSION_DENIED: String = "permission_denied"
         const val SKIP_REASON_NOTIFICATIONS_DISABLED: String = "notifications_disabled"
+        const val SKIP_REASON_DAILY_GOAL_COMPLETED: String = "daily_goal_completed"
+
+        private const val REMINDER_PREFS_NAME: String = "memora_reminder_prefs"
+        private const val PREF_KEY_LAST_REMINDED_LEARNING_DAY: String = "last_reminded_learning_day"
+        private const val NO_REMINDER_DAY_RECORDED: Long = Long.MIN_VALUE
 
         const val UNIQUE_IMMEDIATE_TEST_WORK_NAME: String = "memora_daily_reminder_immediate_test"
         const val TAG_DAILY_REMINDER: String = "memora_daily_reminder"
@@ -188,14 +234,76 @@ class DailyReminderWorker(
         }
 
         /**
-         * Tạo nội dung thông báo hiển thị số thẻ đang chờ ôn tập hôm nay (Mục 10.3).
+         * Xác định hôm nay đã gửi thông báo nhắc học hay chưa để bảo đảm tối đa 1 lần/ngày (Mục 6.10).
          */
-        fun buildNotificationContent(dueCardsCount: Int): String {
-            val safeCount = dueCardsCount.coerceAtLeast(0)
-            return if (safeCount > 0) {
-                "Hôm nay bạn có $safeCount thẻ đang chờ ôn."
-            } else {
-                "Hôm nay bạn có 0 thẻ đang chờ ôn. Vào Memora học thêm từ mới để giữ chuỗi nhé!"
+        fun hasAlreadyRemindedToday(
+            lastRemindedLearningDay: Long?,
+            currentLearningDay: Long
+        ): Boolean {
+            return lastRemindedLearningDay != null && lastRemindedLearningDay == currentLearningDay
+        }
+
+        /**
+         * Chỉ hiển thị thông báo khi còn ít nhất 1 thẻ đến hạn ôn hoặc 1 thẻ mới còn lại hôm nay (Mục 6.10).
+         * Nếu cả hai `<= 0` thì người học đã hoàn thành mục tiêu hôm nay -> bỏ qua để tránh làm phiền.
+         */
+        fun shouldNotifyForCardCounts(
+            dueCardsCount: Int,
+            remainingNewCardsToday: Int
+        ): Boolean {
+            return dueCardsCount > 0 || remainingNewCardsToday > 0
+        }
+
+        /**
+         * Đọc ngày học gần nhất đã gửi thông báo từ preferences cục bộ của module nhắc học (Mục 6.10).
+         */
+        fun getLastRemindedLearningDay(context: Context): Long? {
+            val prefs = reminderPreferences(context)
+            val savedDay = prefs.getLong(PREF_KEY_LAST_REMINDED_LEARNING_DAY, NO_REMINDER_DAY_RECORDED)
+            return savedDay.takeIf { it != NO_REMINDER_DAY_RECORDED }
+        }
+
+        /**
+         * Lưu đồng bộ ngày học vừa gửi thông báo vào preferences để chống bắn trùng khi Worker chạy lại (Mục 6.10).
+         */
+        fun saveLastRemindedLearningDay(context: Context, learningDay: Long) {
+            reminderPreferences(context)
+                .edit()
+                .putLong(PREF_KEY_LAST_REMINDED_LEARNING_DAY, learningDay)
+                .commit()
+        }
+
+        /**
+         * Xóa dấu vết ngày nhắc gần nhất (tiện ích hỗ trợ kiểm thử thủ công nhiều lần trong ngày) (Mục 6.10).
+         */
+        fun clearLastRemindedLearningDay(context: Context) {
+            reminderPreferences(context)
+                .edit()
+                .remove(PREF_KEY_LAST_REMINDED_LEARNING_DAY)
+                .apply()
+        }
+
+        /**
+         * Tạo nội dung thông báo hiển thị số thẻ đang chờ ôn tập / thẻ mới hôm nay (Mục 6.10 & 10.3).
+         */
+        fun buildNotificationContent(
+            dueCardsCount: Int,
+            remainingNewCardsToday: Int = 0
+        ): String {
+            val safeDue = dueCardsCount.coerceAtLeast(0)
+            val safeNew = remainingNewCardsToday.coerceAtLeast(0)
+            return when {
+                safeDue > 0 && safeNew > 0 ->
+                    "Hôm nay bạn có $safeDue thẻ đang chờ ôn và $safeNew thẻ mới cần học."
+
+                safeDue > 0 ->
+                    "Hôm nay bạn có $safeDue thẻ đang chờ ôn."
+
+                safeNew > 0 ->
+                    "Hôm nay bạn còn $safeNew thẻ mới chưa học. Vào Memora để hoàn thành mục tiêu nhé!"
+
+                else ->
+                    "Hôm nay bạn có 0 thẻ đang chờ ôn. Vào Memora học thêm từ mới để giữ chuỗi nhé!"
             }
         }
 
@@ -234,9 +342,13 @@ class DailyReminderWorker(
          */
         fun buildReminderNotification(
             context: Context,
-            dueCardsCount: Int
+            dueCardsCount: Int,
+            remainingNewCardsToday: Int = 0
         ): Notification {
-            val contentText = buildNotificationContent(dueCardsCount)
+            val contentText = buildNotificationContent(
+                dueCardsCount = dueCardsCount,
+                remainingNewCardsToday = remainingNewCardsToday
+            )
             val contentPendingIntent = createContentPendingIntent(context)
 
             return NotificationCompat.Builder(context, CHANNEL_ID)
@@ -255,8 +367,11 @@ class DailyReminderWorker(
         /**
          * Chạy thử `DailyReminderWorker` ngay lập tức qua WorkManager để kiểm thử hiển thị thông báo (Mục 10.3).
          */
-        fun enqueueImmediateTest(context: Context) {
-            val request = buildImmediateTestRequest()
+        fun enqueueImmediateTest(
+            context: Context,
+            ignoreDailyLimit: Boolean = false
+        ) {
+            val request = buildImmediateTestRequest(ignoreDailyLimit = ignoreDailyLimit)
             WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
                 UNIQUE_IMMEDIATE_TEST_WORK_NAME,
                 ExistingWorkPolicy.REPLACE,
@@ -264,10 +379,18 @@ class DailyReminderWorker(
             )
         }
 
-        internal fun buildImmediateTestRequest(): OneTimeWorkRequest {
+        internal fun buildImmediateTestRequest(ignoreDailyLimit: Boolean = false): OneTimeWorkRequest {
             return OneTimeWorkRequestBuilder<DailyReminderWorker>()
+                .setInputData(workDataOf(KEY_IGNORE_DAILY_LIMIT_FOR_TEST to ignoreDailyLimit))
                 .addTag(TAG_DAILY_REMINDER)
                 .build()
+        }
+
+        private fun reminderPreferences(context: Context): SharedPreferences {
+            return context.applicationContext.getSharedPreferences(
+                REMINDER_PREFS_NAME,
+                Context.MODE_PRIVATE
+            )
         }
 
         /**
