@@ -270,28 +270,72 @@ class RoomPracticeSentenceRepository(
         updatedCard
     }
 
-    override suspend fun retryFailedSentence(sentenceId: String): Result<PracticeSentence> = runCatching {
+    override suspend fun retryFailedSentence(sentenceId: String): Result<PracticeSentence> {
         val cleanId = sentenceId.trim()
         val existingEntity = practiceSentenceDao.getSentenceById(cleanId)
-            ?: throw NoSuchElementException("Không tìm thấy câu luyện tập.")
+            ?: return Result.failure(NoSuchElementException("Không tìm thấy câu luyện tập."))
 
         val prefs = preferencesRepository.getUserPreferences()
         if (prefs.aiSentenceGradingRemainingToday <= 0) {
-            throw IllegalStateException(
-                "Bạn đã dùng hết 20 lượt chấm câu AI hôm nay (tự hồi lúc 4:00 sáng)."
+            return Result.failure(
+                IllegalStateException(
+                    "Bạn đã dùng hết 20 lượt chấm câu AI hôm nay (tự hồi lúc 4:00 sáng)."
+                )
             )
         }
 
-        val resetRecord = existingEntity.toDomain().copy(
-            status = SentenceStatus.PENDING_GRADE,
+        val existing = existingEntity.toDomain()
+        val cardEntity = cardDao.getCardById(existing.cardId)
+        val gradingRecord = existing.copy(
+            status = SentenceStatus.GRADING,
             errorMessage = null,
-            retryCount = 0,
             updatedAtMillis = timeProvider(),
             syncStatus = SyncStatus.PENDING_SYNC
         )
+        practiceSentenceDao.upsertSentence(gradingRecord.toEntity())
 
-        practiceSentenceDao.upsertSentence(resetRecord.toEntity())
-        onOfflineSentenceEnqueued?.invoke(resetRecord.id)
-        resetRecord
+        val aiResult = try {
+            aiGradingService.evaluateSentence(
+                targetWord = existing.targetWord,
+                meaningVi = cardEntity?.meaning.orEmpty(),
+                userSentence = existing.sentence
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Result.failure(e)
+        }
+
+        val finalRecord = aiResult.fold(
+            onSuccess = { evaluation ->
+                if (consumeQuotaOnOnlineSuccess) {
+                    preferencesRepository.consumeSentenceGradingQuota()
+                }
+                gradingRecord.copy(
+                    status = SentenceStatus.GRADED,
+                    score = evaluation.score,
+                    cefrLevel = evaluation.cefrLevel,
+                    feedbackVi = evaluation.feedbackVi,
+                    grammarAnalysis = evaluation.grammarAnalysis,
+                    correctedSentence = evaluation.correctedSentence,
+                    naturalAlternative = evaluation.naturalAlternative,
+                    errorMessage = null,
+                    updatedAtMillis = timeProvider(),
+                    syncStatus = SyncStatus.PENDING_SYNC
+                )
+            },
+            onFailure = { error ->
+                gradingRecord.copy(
+                    status = SentenceStatus.GRADE_ERROR,
+                    errorMessage = error.message ?: "Chưa thể chấm câu lúc này, bạn bấm Chấm lại nhé.",
+                    retryCount = existing.retryCount + 1,
+                    updatedAtMillis = timeProvider(),
+                    syncStatus = SyncStatus.PENDING_SYNC
+                )
+            }
+        )
+
+        practiceSentenceDao.upsertSentence(finalRecord.toEntity())
+        return Result.success(finalRecord)
     }
 }

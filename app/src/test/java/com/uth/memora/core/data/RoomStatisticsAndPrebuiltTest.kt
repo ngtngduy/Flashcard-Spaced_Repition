@@ -60,6 +60,7 @@ class RoomStatisticsAndPrebuiltTest {
         }
         assertEquals(0, initialStats.masteredCardsCount)
         assertEquals(0L, initialStats.totalStudyTimeSeconds)
+        assertEquals(0, initialStats.remainingNewCardsToday)
 
         // 2. Chèn 6 thẻ thuộc đủ 6 cấp độ RetentionStage (Cấp 0 -> Cấp 5)
         val cards = listOf(
@@ -157,6 +158,7 @@ class RoomStatisticsAndPrebuiltTest {
         // Tổng thời gian học tính mọi log hợp lệ (không tính l_undone): 15 + 20 + 25 + 10 + 30 = 100s
         assertEquals(100L, updatedStats.totalStudyTimeSeconds)
         assertEquals(1, updatedStats.newCardsLearnedToday)
+        assertEquals(1, updatedStats.remainingNewCardsToday)
         assertEquals(1, updatedStats.reviewsToday)
         assertEquals(2, updatedStats.dueCardsCount)
 

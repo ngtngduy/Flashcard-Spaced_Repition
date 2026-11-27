@@ -10,6 +10,7 @@ import com.uth.memora.core.domain.StatisticsRepository
 import com.uth.memora.core.domain.UserPreferencesRepository
 import com.uth.memora.core.domain.logic.StreakCalculator
 import com.uth.memora.core.model.Card
+import com.uth.memora.core.model.CardState
 import com.uth.memora.core.model.Deck
 import com.uth.memora.core.model.RetentionStage
 import com.uth.memora.core.model.ReviewQuality
@@ -91,7 +92,9 @@ class RoomStatisticsRepository(
             UserPreferences.MAX_DAILY_NEW_CARDS
         )
         val newCardsLearnedToday = activeCards.count { it.firstSeenDay == todayLearningDay }
-        val remainingNewCardsToday = (dailyLimit - newCardsLearnedToday).coerceAtLeast(0)
+        val availableNewCardsCount = activeCards.count { it.state == CardState.NEW }
+        val remainingDailyQuota = (dailyLimit - newCardsLearnedToday).coerceAtLeast(0)
+        val remainingNewCardsToday = minOf(remainingDailyQuota, availableNewCardsCount)
 
         val reviewsToday = validLogs.count { it.learningDay == todayLearningDay }
         val dueCardsCount = activeCards.count { it.isDue(todayLearningDay, nowMillis) }
