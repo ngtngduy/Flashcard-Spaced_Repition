@@ -448,6 +448,11 @@ class RoomStudyAndPracticeRepositoryTest {
         val updatedCard = practiceRepo.saveCorrectedSentenceAsExample(graded.id).getOrThrow()
         assertEquals("She remained resilient during the crisis.", updatedCard.example)
         assertNotNull(cardDao.getCardById("c1"))
+
+        // Chấm lại câu đang chờ/lỗi (retryFailedSentence) -> gọi AI chấm trực tiếp sang GRADED và trừ 1 lượt quota còn lại (1 -> 0)
+        val retried = practiceRepo.retryFailedSentence(offline1.id).getOrThrow()
+        assertEquals(SentenceStatus.GRADED, retried.status)
+        assertEquals(0, prefsRepo.getUserPreferences().aiSentenceGradingRemainingToday)
     }
 
     companion object {
