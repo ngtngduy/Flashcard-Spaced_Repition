@@ -15,6 +15,10 @@ if (localPropertiesFile.exists()) {
 val geminiApiKey: String = localProperties.getProperty("GEMINI_API_KEY")
     ?: System.getenv("GEMINI_API_KEY")
     ?: ""
+val hasGoogleServicesJson: Boolean = file("google-services.json").exists()
+if (hasGoogleServicesJson) {
+    apply(plugin = "com.google.gms.google-services")
+}
 
 android {
     namespace = "com.uth.memora"
@@ -30,6 +34,9 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
+        if (!hasGoogleServicesJson) {
+            resValue("string", "default_web_client_id", "\"\"")
+        }
     }
 
     buildTypes {
@@ -91,6 +98,16 @@ dependencies {
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.coroutines.play.services)
+
+    // Firebase (Auth, Firestore, Storage) & Google Sign-In Credential Manager
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
+    implementation(libs.firebase.storage)
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.googleid)
 
     // Google Gemini AI SDK
     implementation(libs.google.generativeai)
