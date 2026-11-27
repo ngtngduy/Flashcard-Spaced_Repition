@@ -162,7 +162,7 @@ fun MemoraApp(
                 val deckId = backStackEntry.arguments?.getString("deckId") ?: ""
                 DeckDetailRoute(
                     deckId = deckId,
-                    onStartStudy = { navController.navigate(MemoraRoutes.study(deckId)) },
+                    onStartStudy = { dId, mode -> navController.navigate(MemoraRoutes.study(dId, mode)) },
                     onAddCard = { navController.navigate(MemoraRoutes.cardEditor(deckId)) },
                     onEditCard = { dId, cId -> navController.navigate(MemoraRoutes.cardEditor(dId, cId)) },
                     onBack = { navController.popBackStack() }
