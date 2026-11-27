@@ -46,6 +46,12 @@ class StudyViewModel(
     // Lưu các thẻ mới đã được đánh dấu hiển thị lần đầu trong phiên (Mục 6.5)
     private val displayedNewCardIds = mutableSetOf<String>()
 
+    // Lưu các thẻ mới đã được xếp học lại 1 lần trong phiên NEW_CARDS để chống lặp vô tận
+    private val requeuedCardIdsInSession = mutableSetOf<String>()
+
+    // Khóa chống bấm liên tiếp nhiều lần khi đang xử lý kết quả đánh giá thẻ
+    private var isSubmittingRating: Boolean = false
+
     // Ghi nhớ lượt đánh giá gần nhất có xếp lặp lại thẻ xuống cuối hàng đợi hay không
     private var lastRatingRequeuedCard: Boolean = false
     private var lastRatingDurationSeconds: Int = 0
@@ -66,6 +72,8 @@ class StudyViewModel(
      */
     fun loadQueue() {
         undoCountdownJob?.cancel()
+        isSubmittingRating = false
+        requeuedCardIdsInSession.clear()
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -180,8 +188,10 @@ class StudyViewModel(
      * khi hoàn tất toàn bộ phiên, gọi repository.getTomorrowDueCount() cho màn Tổng kết (Figma 2199:19).
      */
     fun submitRating(quality: ReviewQuality) {
+        if (isSubmittingRating) return
         val state = _uiState.value
         val currentCard = state.currentCard ?: return
+        isSubmittingRating = true
 
         viewModelScope.launch {
             val now = System.currentTimeMillis()
@@ -205,8 +215,12 @@ class StudyViewModel(
                 val mutableQueue = state.queue.toMutableList()
                 mutableQueue[state.currentIndex] = updatedCard
 
-                val shouldRepeatInSession = (studyMode == StudyMode.NEW_CARDS && quality == ReviewQuality.AGAIN) ||
-                    updatedCard.state == CardState.LEARNING
+                // Trong chế độ Ôn tập (DUE_REVIEW), không tự động nhân bản thẻ vào cuối hàng đợi hiện tại
+                // để tránh lỗi 2 thẻ bị nhân bản thành 16 thẻ khi bấm liên tục "Chưa nhớ" / "Khó".
+                // Trong chế độ Học từ mới (NEW_CARDS), nếu bấm "Học lại" (AGAIN) thì chỉ xếp lại tối đa 1 lần.
+                val shouldRepeatInSession = studyMode == StudyMode.NEW_CARDS &&
+                    quality == ReviewQuality.AGAIN &&
+                    requeuedCardIdsInSession.add(currentCard.id)
                 lastRatingRequeuedCard = shouldRepeatInSession
                 lastRatingDurationSeconds = durationSeconds
                 if (shouldRepeatInSession) {
@@ -282,7 +296,9 @@ class StudyViewModel(
                 }
 
                 startUndoCountdownWindow()
+                isSubmittingRating = false
             }.onFailure { error ->
+                isSubmittingRating = false
                 _uiState.update {
                     it.copy(
                         errorMessage = error.message ?: "Không thể lưu kết quả đánh giá thẻ."
@@ -367,6 +383,7 @@ class StudyViewModel(
 
                 if (lastRatingRequeuedCard && mutableQueue.size > targetIndex + 1) {
                     mutableQueue.removeAt(mutableQueue.lastIndex)
+                    requeuedCardIdsInSession.remove(restoredCard.id)
                 }
                 lastRatingRequeuedCard = false
 
