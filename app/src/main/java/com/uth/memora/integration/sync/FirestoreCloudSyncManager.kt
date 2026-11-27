@@ -245,13 +245,22 @@ class FirestoreCloudSyncManager(
                     }
                 }
 
-                // Chạy đồng bộ 2 chiều đầy đủ (sinceMillis = 0L) để tải toàn bộ dữ liệu Cloud và đẩy dữ liệu vừa gộp lên (Mục 10.1)
-                runTwoWaySyncUnlocked(
-                    uid = cleanAccountId,
-                    sinceMillis = 0L
-                )
-
+                // Dữ liệu Khách cục bộ trong Room đã gộp/xóa xong -> xóa dấu vết phiên khách ngay
                 pendingGuestOwnerId = null
+
+                // Chạy đồng bộ 2 chiều đầy đủ (sinceMillis = 0L) theo chế độ best-effort:
+                // nếu lỗi mạng/Firestore thì chỉ ghi log ở chế độ DEBUG, không làm fail mergeGuestDataIntoAccount
+                // để người dùng vẫn vào được ứng dụng và SyncWorker sẽ đồng bộ bù ở nền (Bug M3-1 · Mục 10.1)
+                runCatching {
+                    runTwoWaySyncUnlocked(
+                        uid = cleanAccountId,
+                        sinceMillis = 0L
+                    )
+                }.onFailure { error ->
+                    if (error is CancellationException) throw error
+                    logDebugSyncFailure(error)
+                }
+
                 Result.success(Unit)
             } catch (e: CancellationException) {
                 throw e
