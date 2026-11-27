@@ -1,10 +1,21 @@
 package com.uth.memora.feature.study
 
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.uth.memora.core.model.StudyMode
-import com.uth.memora.feature.common.PlaceholderScreen
+import com.uth.memora.memoraViewModelFactory
+import kotlinx.coroutines.launch
 
+/**
+ * Route điều hướng cho màn hình Phiên học Flashcard (Mục 6.5, 6.6 & 9).
+ * Giữ nguyên chữ ký hàm để tương thích với MemoraNavHost.kt.
+ */
 @Composable
 fun StudyRoute(
     deckId: String,
@@ -12,12 +23,45 @@ fun StudyRoute(
     onIntermission: (String) -> Unit,
     onFinishSession: () -> Unit,
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onNavigateToPractice: () -> Unit = onFinishSession
 ) {
-    PlaceholderScreen(
-        title = "Phiên học (${studyMode.labelVi})",
-        owner = "Người 2 – UI & Luồng học",
-        description = "Figma 2104:23/2101:14 (Học từ mới 2 nút) & 2101:15/2101:16 (Ôn tập 4 nút SM-2) + Hoàn tác 5s ($deckId).",
-        modifier = modifier
+    val viewModel: StudyViewModel = viewModel(
+        key = "study_${deckId}_${studyMode.name}",
+        factory = memoraViewModelFactory { container ->
+            StudyViewModel(
+                repository = container.studySessionRepository,
+                deckId = deckId,
+                studyMode = studyMode
+            )
+        }
+    )
+
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
+
+    val speakWord = rememberMemoraTtsSpeaker(
+        onError = { message ->
+            coroutineScope.launch {
+                snackbarHostState.showSnackbar(message)
+            }
+        }
+    )
+
+    StudyScreen(
+        uiState = uiState,
+        onFlipCard = viewModel::toggleFlip,
+        onRateCard = viewModel::submitRating,
+        onSpeakWord = speakWord,
+        onRetry = viewModel::loadQueue,
+        onFinishSession = onFinishSession,
+        onBack = onBack,
+        modifier = modifier,
+        onUndoRating = viewModel::undoLastRating,
+        onContinueNextChunk = viewModel::continueToNextChunk,
+        onPauseFromIntermission = viewModel::finishSessionFromIntermission,
+        onNavigateToPractice = onNavigateToPractice,
+        snackbarHostState = snackbarHostState
     )
 }
