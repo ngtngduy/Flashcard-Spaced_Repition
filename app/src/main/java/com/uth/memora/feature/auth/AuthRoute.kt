@@ -13,9 +13,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.uth.memora.feature.common.ConfirmDialog
 import com.uth.memora.feature.theme.MemoraTheme
 import com.uth.memora.integration.auth.GoogleSignInHelper
+import com.uth.memora.integration.worker.SyncScheduler
 import kotlinx.coroutines.launch
 
 /**
@@ -38,9 +38,13 @@ fun AuthRoute(
     val viewModel: AuthViewModel = viewModel(factory = AuthViewModel.Factory)
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    // Gọi onAuthSuccess() một lần duy nhất khi xác thực (và gộp dữ liệu khách nếu có) hoàn tất (Mục 6.2)
+    // Khi xác thực (và gộp dữ liệu Khách nếu có) hoàn tất -> kích hoạt SyncScheduler cho tài khoản chính thức rồi điều hướng (Mục 6.2 & 10.1)
     LaunchedEffect(uiState.isAuthSuccess) {
         if (uiState.isAuthSuccess) {
+            if (uiState.shouldTriggerCloudSync) {
+                SyncScheduler.enqueueImmediateSync(context, replaceExisting = true)
+                SyncScheduler.schedulePeriodicSync(context)
+            }
             viewModel.consumeAuthSuccess()
             onAuthSuccess()
         }
@@ -144,16 +148,13 @@ private fun AuthRouteContent(
         }
     }
 
-    // Hộp thoại xử lý gộp dữ liệu Khách khi đang có dữ liệu cục bộ (Mục 6.2 & 10.1)
+    // Hộp thoại xử lý gộp dữ liệu Khách chuẩn Figma Node 2196:16 khi chuyển sang tài khoản chính thức (Mục 6.2 & 10.1)
     if (uiState.showMergeGuestDialog) {
-        ConfirmDialog(
-            title = "Gộp dữ liệu khách?",
-            message = "Thiết bị đang có dữ liệu học tập ở chế độ Khách. Bạn muốn gộp vào tài khoản này hay bỏ dữ liệu khách?",
-            confirmText = "Gộp dữ liệu",
-            dismissText = "Bỏ dữ liệu khách",
-            isDestructive = false,
-            onConfirm = { onResolveGuestMerge(false) },
-            onDismiss = { onResolveGuestMerge(true) }
+        MergeGuestDialog(
+            isProcessing = uiState.isMergingGuestData,
+            errorMessage = uiState.errorMessage,
+            onMergeIntoAccount = { onResolveGuestMerge(false) },
+            onDiscardGuestData = { onResolveGuestMerge(true) }
         )
     }
 }

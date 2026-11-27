@@ -7,8 +7,10 @@ import androidx.lifecycle.viewModelScope
 import com.uth.memora.core.domain.AuthRepository
 import com.uth.memora.core.domain.CloudSyncManager
 import com.uth.memora.core.domain.DeckRepository
+import com.uth.memora.core.model.Deck
 import com.uth.memora.core.model.UserAccount
 import com.uth.memora.integration.auth.GoogleSignInException
+import com.uth.memora.integration.sync.FirestoreCloudSyncManager
 import com.uth.memora.memoraViewModelFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -345,7 +347,8 @@ class AuthViewModel(
                             isGuestLoading = false,
                             errorMessage = null,
                             pendingMergeAccountId = null,
-                            isAuthSuccess = true
+                            isAuthSuccess = true,
+                            shouldTriggerCloudSync = false
                         )
                     }
                 },
@@ -400,6 +403,7 @@ class AuthViewModel(
                             pendingMergeAccountId = null,
                             hasLocalGuestData = false,
                             isAuthSuccess = true,
+                            shouldTriggerCloudSync = true,
                             errorMessage = null
                         )
                     }
@@ -424,13 +428,21 @@ class AuthViewModel(
     }
 
     fun consumeAuthSuccess() {
-        _uiState.update { it.copy(isAuthSuccess = false) }
+        _uiState.update {
+            it.copy(
+                isAuthSuccess = false,
+                shouldTriggerCloudSync = false
+            )
+        }
     }
 
     /**
      * Luồng dùng chung cho các hình thức đăng nhập/đăng ký tài khoản chính thức (Email & Google):
-     * kiểm tra dữ liệu Khách cục bộ TRƯỚC khi gọi `authRepository`, sau đó nếu có dữ liệu Khách
-     * sẽ đặt `pendingMergeAccountId = account.uid` để hiển thị `MergeGuestDialog` thay vì điều hướng ngay (Mục 6.2 & 10.1).
+     * - Ghi nhận `ownerId` Khách & kiểm tra dữ liệu Khách cục bộ TRƯỚC khi gọi `authRepository`.
+     * - Sau khi đăng nhập tài khoản chính thức:
+     *   - Nếu có dữ liệu Khách cục bộ VÀ tài khoản đã có dữ liệu trên Cloud -> bật `MergeGuestDialog` (Figma 2196:16).
+     *   - Nếu có dữ liệu Khách cục bộ nhưng tài khoản Cloud đang trống -> tự động gộp vào tài khoản mới rồi đồng bộ.
+     *   - Nếu không có dữ liệu Khách cục bộ -> hoàn tất và kích hoạt `SyncScheduler` tải dữ liệu Cloud về máy (Mục 6.2 & 10.1).
      */
     private fun authenticateOfficialAccount(
         fallbackError: String,
@@ -449,8 +461,17 @@ class AuthViewModel(
                 )
             }
 
-            // Kiểm tra dữ liệu Khách cục bộ TRƯỚC khi phiên Auth chuyển sang tài khoản chính thức (Mục 10.1)
+            // Ghi nhận UID Khách (ẩn danh Firebase hoặc guest_local) và kiểm tra dữ liệu cục bộ TRƯỚC khi chuyển tài khoản (Mục 10.1)
+            val previousUser = runCatching { authRepository.getCurrentUser() }.getOrNull()
+            val guestOwnerIdBeforeAuth = previousUser
+                ?.takeIf { it.isAnonymous }
+                ?.uid
+                ?.takeIf { it.isNotBlank() }
+                ?: Deck.GUEST_OWNER_ID
             val hadLocalGuestData = checkHasLocalGuestDataBeforeAuth()
+            if (hadLocalGuestData) {
+                (cloudSyncManager as? FirestoreCloudSyncManager)?.rememberGuestOwnerId(guestOwnerIdBeforeAuth)
+            }
             _uiState.update { it.copy(hasLocalGuestData = hadLocalGuestData) }
 
             val authResult = try {
@@ -463,14 +484,73 @@ class AuthViewModel(
 
             authResult.fold(
                 onSuccess = { account ->
-                    val shouldPromptMerge =
-                        hadLocalGuestData && !account.isAnonymous && account.uid.isNotBlank()
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            errorMessage = null,
-                            pendingMergeAccountId = if (shouldPromptMerge) account.uid else null,
-                            isAuthSuccess = !shouldPromptMerge
+                    val isOfficialAccount = !account.isAnonymous && account.uid.isNotBlank()
+                    if (!hadLocalGuestData || !isOfficialAccount) {
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                errorMessage = null,
+                                pendingMergeAccountId = null,
+                                isAuthSuccess = true,
+                                shouldTriggerCloudSync = isOfficialAccount
+                            )
+                        }
+                        return@fold
+                    }
+
+                    val hasCloudData = checkHasRemoteCloudData(account.uid)
+                    if (hasCloudData) {
+                        // Tài khoản đã có dữ liệu trên Cloud -> mở MergeGuestDialog hỏi rõ người dùng (Figma 2196:16)
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                errorMessage = null,
+                                pendingMergeAccountId = account.uid,
+                                isAuthSuccess = false,
+                                shouldTriggerCloudSync = false
+                            )
+                        }
+                    } else {
+                        // Tài khoản mới chưa có dữ liệu Cloud -> tự động chuyển dữ liệu Khách sang tài khoản này (Mục 6.2 & 10.1)
+                        val autoMergeResult = try {
+                            cloudSyncManager?.mergeGuestDataIntoAccount(
+                                accountId = account.uid,
+                                discardGuestData = false
+                            ) ?: Result.success(Unit)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Throwable) {
+                            Result.failure(e)
+                        }
+
+                        autoMergeResult.fold(
+                            onSuccess = {
+                                _uiState.update {
+                                    it.copy(
+                                        isLoading = false,
+                                        errorMessage = null,
+                                        pendingMergeAccountId = null,
+                                        hasLocalGuestData = false,
+                                        isAuthSuccess = true,
+                                        shouldTriggerCloudSync = true
+                                    )
+                                }
+                            },
+                            onFailure = { mergeError ->
+                                // Nếu gộp tự động gặp lỗi mạng -> bật MergeGuestDialog kèm thông báo để người dùng thử lại
+                                _uiState.update {
+                                    it.copy(
+                                        isLoading = false,
+                                        pendingMergeAccountId = account.uid,
+                                        isAuthSuccess = false,
+                                        shouldTriggerCloudSync = false,
+                                        errorMessage = mapErrorToVietnamese(
+                                            throwable = mergeError,
+                                            fallback = ERROR_MERGE_GUEST_FAILED_VI
+                                        )
+                                    )
+                                }
+                            }
                         )
                     }
                 },
@@ -486,6 +566,21 @@ class AuthViewModel(
                     }
                 }
             )
+        }
+    }
+
+    /**
+     * Kiểm tra tài khoản [accountId] đã có dữ liệu trên Cloud Firestore hay chưa (Mục 6.2 & 10.1).
+     * Khi dùng `FakeCloudSyncManager` hoặc không truy vấn được mạng -> trả `true` để luôn hỏi người dùng an toàn.
+     */
+    private suspend fun checkHasRemoteCloudData(accountId: String): Boolean {
+        val firestoreSync = cloudSyncManager as? FirestoreCloudSyncManager ?: return true
+        return try {
+            firestoreSync.hasRemoteCloudData(accountId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            true
         }
     }
 
