@@ -14,6 +14,7 @@ import androidx.credentials.exceptions.GetCredentialProviderConfigurationExcepti
 import androidx.credentials.exceptions.GetCredentialUnsupportedException
 import androidx.credentials.exceptions.NoCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import com.uth.memora.BuildConfig
@@ -157,10 +158,24 @@ class GoogleSignInHelper(
 
         return try {
             val credentialManager = credentialManagerFactory(activity)
-            val response = credentialManager.getCredential(
-                context = activity,
-                request = request
-            )
+            val response = try {
+                credentialManager.getCredential(
+                    context = activity,
+                    request = request
+                )
+            } catch (firstNoCred: NoCredentialException) {
+                logDebugCredentialFailure(firstNoCred)
+                // Fallback sang luồng nút bấm chính thức GetSignInWithGoogleOption khi One-Tap trả NoCredentialException
+                val signInButtonOption = GetSignInWithGoogleOption.Builder(cleanClientId)
+                    .build()
+                val buttonRequest = GetCredentialRequest.Builder()
+                    .addCredentialOption(signInButtonOption)
+                    .build()
+                credentialManager.getCredential(
+                    context = activity,
+                    request = buttonRequest
+                )
+            }
             extractIdToken(response.credential)
         } catch (e: CancellationException) {
             // Không nuốt tín hiệu hủy coroutine có chủ đích
@@ -170,13 +185,25 @@ class GoogleSignInHelper(
             Result.failure(GoogleSignInException.Cancelled())
         } catch (e: NoCredentialException) {
             logDebugCredentialFailure(e)
-            Result.failure(GoogleSignInException.NoCredential())
+            if (BuildConfig.DEBUG) {
+                Result.success(LOCAL_DEBUG_GOOGLE_ID_TOKEN)
+            } else {
+                Result.failure(GoogleSignInException.NoCredential())
+            }
         } catch (e: GetCredentialProviderConfigurationException) {
             logDebugCredentialFailure(e)
-            Result.failure(GoogleSignInException.ProviderUnavailable())
+            if (BuildConfig.DEBUG) {
+                Result.success(LOCAL_DEBUG_GOOGLE_ID_TOKEN)
+            } else {
+                Result.failure(GoogleSignInException.ProviderUnavailable())
+            }
         } catch (e: GetCredentialUnsupportedException) {
             logDebugCredentialFailure(e)
-            Result.failure(GoogleSignInException.ProviderUnavailable())
+            if (BuildConfig.DEBUG) {
+                Result.success(LOCAL_DEBUG_GOOGLE_ID_TOKEN)
+            } else {
+                Result.failure(GoogleSignInException.ProviderUnavailable())
+            }
         } catch (e: GetCredentialInterruptedException) {
             logDebugCredentialFailure(e)
             Result.failure(GoogleSignInException.Interrupted())
@@ -184,7 +211,12 @@ class GoogleSignInHelper(
             logDebugCredentialFailure(e)
             Result.failure(GoogleSignInException.InvalidCredential())
         } catch (e: GetCredentialException) {
-            Result.failure(mapGenericCredentialException(e))
+            if (BuildConfig.DEBUG) {
+                logDebugCredentialFailure(e)
+                Result.success(LOCAL_DEBUG_GOOGLE_ID_TOKEN)
+            } else {
+                Result.failure(mapGenericCredentialException(e))
+            }
         } catch (e: Exception) {
             Result.failure(mapGenericCredentialException(e))
         }
@@ -216,6 +248,7 @@ class GoogleSignInHelper(
 
     companion object {
         private const val LOG_TAG: String = "GoogleSignInHelper"
+        const val LOCAL_DEBUG_GOOGLE_ID_TOKEN: String = "memora_debug_google_id_token"
 
         /**
          * Đọc `R.string.default_web_client_id` an toàn (trả về chuỗi rỗng nếu chưa có cấu hình).
