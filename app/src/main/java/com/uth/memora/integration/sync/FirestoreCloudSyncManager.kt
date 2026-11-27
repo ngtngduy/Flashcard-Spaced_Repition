@@ -10,6 +10,7 @@ import com.google.firebase.storage.FirebaseStorage
 import com.uth.memora.core.database.MemoraDatabase
 import com.uth.memora.core.database.dao.DeckDao
 import com.uth.memora.core.database.mapper.toDomain
+import com.uth.memora.core.database.mapper.toEntity
 import com.uth.memora.core.domain.AuthRepository
 import com.uth.memora.core.domain.CloudSyncManager
 import com.uth.memora.core.domain.UserPreferencesRepository
@@ -37,11 +38,15 @@ import java.io.IOException
  * - `users/{uid}/reviewLogs/{id}`
  * - `users/{uid}/practiceSentences/{id}`
  *
- * Hiện thực đẩy (Push) theo lô (`WriteBatch` tối đa 450 bản ghi/lô với `SetOptions.merge()`)
- * cho cả 4 bảng `Deck`, `Card`, `ReviewLog` và `PracticeSentence` đang có `syncStatus == PENDING_SYNC`,
- * sau đó cập nhật `SyncStatus.SYNCED` trong Room Database trong transaction mà vẫn giữ nguyên
- * `updatedAtMillis` gốc để bảo toàn Last-Write-Wins. Tài khoản Khách (`isAnonymous == true`)
- * được bỏ qua push/pull cho đến khi đăng nhập tài khoản chính thức.
+ * Hiện thực đồng bộ 2 chiều (Push & Pull) cho cả 4 bảng `Deck`, `Card`, `ReviewLog` và
+ * `PracticeSentence`:
+ * - Push: đẩy theo lô (`WriteBatch` tối đa 450 bản ghi/lô với `SetOptions.merge()`) các bản ghi
+ *   `syncStatus == PENDING_SYNC`, sau đó cập nhật `SyncStatus.SYNCED` trong Room mà vẫn giữ
+ *   nguyên `updatedAtMillis` gốc để bảo toàn Last-Write-Wins.
+ * - Pull: đọc mốc `lastSyncedAtMillis` (mặc định `0L`), truy vấn thay đổi mới hơn từ Firestore
+ *   (`whereGreaterThan("updatedAtMillis", lastSyncedAtMillis)`), áp dụng vào Room theo quy tắc
+ *   Last-Write-Wins rồi cập nhật `lastSyncedAtMillis` sau khi hoàn tất.
+ * - Tài khoản Khách (`isAnonymous == true`) được bỏ qua push/pull cho đến khi đăng nhập tài khoản chính thức.
  */
 class FirestoreCloudSyncManager(
     private val authRepository: AuthRepository,
@@ -57,17 +62,17 @@ class FirestoreCloudSyncManager(
     private val syncMutex = Mutex()
 
     /**
-     * Đồng bộ các thay đổi đang chờ (`PENDING_SYNC`) của tài khoản chính thức lên Cloud Firestore (Mục 8.3 & Mục 10.1).
+     * Đồng bộ 2 chiều (Push + Pull) dữ liệu học tập của tài khoản chính thức với Cloud Firestore (Mục 8.3 & Mục 10.1).
      *
      * Thứ tự thực hiện:
      * 1. Nếu chưa đăng nhập hoặc đang ở chế độ Khách (`isAnonymous == true`) -> bỏ qua push/pull, trả `Result.success(0)`.
-     * 2. Đẩy toàn bộ `Deck` đang `PENDING_SYNC` trước để bảo đảm quan hệ tham chiếu bộ -> thẻ.
-     * 3. Đẩy toàn bộ `Card` đang `PENDING_SYNC` (bao gồm cả thẻ xóa mềm `isDeleted = true`).
-     * 4. Đẩy toàn bộ `ReviewLog` (lịch sử ôn tập SM-2 & cờ `isUndone`) đang `PENDING_SYNC`.
-     * 5. Đẩy toàn bộ `PracticeSentence` (lịch sử đặt câu & kết quả chấm AI) đang `PENDING_SYNC`.
-     * 6. Cập nhật mốc `lastSyncedAtMillis` vào DataStore sau khi đồng bộ thành công.
+     * 2. Đọc mốc `lastSyncedAtMillis` từ DataStore (mặc định `0L` cho lần đầu đăng nhập trên thiết bị mới).
+     * 3. Push toàn bộ bản ghi `PENDING_SYNC` theo thứ tự: `Deck` -> `Card` -> `ReviewLog` -> `PracticeSentence`.
+     * 4. Pull toàn bộ thay đổi mới hơn `lastSyncedAtMillis` từ Firestore về Room theo đúng thứ tự khóa ngoại
+     *    `Deck` -> `Card` -> `ReviewLog` -> `PracticeSentence` (kèm bảo vệ Last-Write-Wins).
+     * 5. Lưu mốc `lastSyncedAtMillis = now` vào `UserPreferencesRepository` sau khi cả Push và Pull thành công.
      *
-     * @return [Result.success] kèm tổng số bản ghi đã đẩy thành công, hoặc [Result.failure] với thông báo tiếng Việt.
+     * @return [Result.success] kèm tổng số bản ghi đã đẩy và tải về thành công, hoặc [Result.failure] với thông báo tiếng Việt.
      */
     override suspend fun syncPendingChanges(): Result<Int> = syncMutex.withLock {
         withContext(ioDispatcher) {
@@ -76,18 +81,35 @@ class FirestoreCloudSyncManager(
                 val uid = resolveAuthenticatedUid()
                     ?: return@withContext Result.success(0)
 
-                // Đẩy theo thứ tự tham chiếu: Deck -> Card -> ReviewLog -> PracticeSentence (Mục 8.3 & 10.1)
+                val lastSyncedAtMillis = userPreferencesRepository
+                    .getUserPreferences()
+                    .lastSyncedAtMillis ?: 0L
+
+                // 1. Push thay đổi cục bộ theo thứ tự tham chiếu: Deck -> Card -> ReviewLog -> PracticeSentence (Mục 8.3 & 10.1)
                 val pushedDecksCount = pushPendingDecks(uid)
                 val pushedCardsCount = pushPendingCards(uid)
                 val pushedReviewLogsCount = pushPendingReviewLogs(uid)
                 val pushedPracticeSentencesCount = pushPendingPracticeSentences(uid)
-                val totalSyncedCount = pushedDecksCount +
+                val totalPushedCount = pushedDecksCount +
                     pushedCardsCount +
                     pushedReviewLogsCount +
                     pushedPracticeSentencesCount
 
-                userPreferencesRepository.setLastSyncedAtMillis(nowProvider())
-                Result.success(totalSyncedCount)
+                // 2. Pull thay đổi từ Firestore về Room theo thứ tự khóa ngoại (Mục 8.3 & 10.1)
+                val pulledDecksCount = pullRemoteDecks(uid, lastSyncedAtMillis)
+                val pulledCardsCount = pullRemoteCards(uid, lastSyncedAtMillis)
+                val pulledReviewLogsCount = pullRemoteReviewLogs(uid, lastSyncedAtMillis)
+                val pulledPracticeSentencesCount = pullRemotePracticeSentences(uid, lastSyncedAtMillis)
+                val totalPulledCount = pulledDecksCount +
+                    pulledCardsCount +
+                    pulledReviewLogsCount +
+                    pulledPracticeSentencesCount
+
+                // 3. Ghi nhận mốc đồng bộ mới nhất sau khi hoàn tất cả Push & Pull (Mục 10.1 & 13)
+                val now = nowProvider()
+                userPreferencesRepository.setLastSyncedAtMillis(now)
+
+                Result.success(totalPushedCount + totalPulledCount)
             } catch (e: CancellationException) {
                 // Không nuốt tín hiệu hủy coroutine có chủ đích từ ViewModel / Worker
                 throw e
@@ -218,6 +240,217 @@ class FirestoreCloudSyncManager(
         }
 
         return syncedCount
+    }
+
+    // ============================================================================
+    // BƯỚC PULL TỪ CLOUD FIRESTORE VỀ ROOM DATABASE (Mục 8.3 & Mục 10.1)
+    // ============================================================================
+
+    /**
+     * Kéo các [Deck] có `updatedAtMillis > lastSyncedAtMillis` từ `users/{uid}/decks` về Room (Mục 8.3 & 10.1).
+     * Chèn mới hoặc ghi đè theo Last-Write-Wins dựa trên `updatedAtMillis` (kể cả bộ từ xóa mềm `isDeleted = true`).
+     */
+    internal suspend fun pullRemoteDecks(uid: String, lastSyncedAtMillis: Long): Int {
+        val snapshot = userDocument(uid)
+            .collection(FirestoreCollections.DECKS)
+            .whereGreaterThan(FirestoreFields.UPDATED_AT_MILLIS, lastSyncedAtMillis)
+            .get()
+            .await()
+
+        val remoteDecks = snapshot.documents
+            .mapNotNull { it.toDeck(fallbackOwnerId = uid) }
+            .map { it.copy(ownerId = uid, syncStatus = SyncStatus.SYNCED) }
+        if (remoteDecks.isEmpty()) return 0
+
+        val deckDao = database.deckDao()
+        var appliedCount = 0
+
+        database.withTransaction {
+            val decksToUpsert = ArrayList<Deck>(remoteDecks.size)
+            for (remoteDeck in remoteDecks) {
+                val localDeck = deckDao.getDeckByIdIncludingDeleted(remoteDeck.id)
+                if (localDeck == null || remoteDeck.updatedAtMillis > localDeck.updatedAtMillis) {
+                    decksToUpsert.add(remoteDeck)
+                }
+            }
+            if (decksToUpsert.isNotEmpty()) {
+                deckDao.upsertDecks(decksToUpsert.map { it.toEntity() })
+                appliedCount = decksToUpsert.size
+            }
+        }
+
+        return appliedCount
+    }
+
+    /**
+     * Kéo các [Card] có `updatedAtMillis > lastSyncedAtMillis` từ `users/{uid}/cards` về Room (Mục 7.1, 8.3 & 10.1).
+     * Bảo đảm bộ từ cha (`deckId`) tồn tại trước khi chèn để không vi phạm khóa ngoại, đồng thời giữ lại
+     * `localImagePath` cục bộ nếu `cloudImageUrl` không đổi.
+     */
+    internal suspend fun pullRemoteCards(uid: String, lastSyncedAtMillis: Long): Int {
+        val snapshot = userDocument(uid)
+            .collection(FirestoreCollections.CARDS)
+            .whereGreaterThan(FirestoreFields.UPDATED_AT_MILLIS, lastSyncedAtMillis)
+            .get()
+            .await()
+
+        val remoteCards = snapshot.documents
+            .mapNotNull { it.toCard(fallbackOwnerId = uid) }
+            .filter { it.deckId.isNotBlank() }
+            .map { it.copy(ownerId = uid, syncStatus = SyncStatus.SYNCED) }
+        if (remoteCards.isEmpty()) return 0
+
+        // Kiểm tra các deckId chưa có cục bộ (trường hợp lệch đồng hồ trong kéo tăng dần) để đảm bảo khóa ngoại Room
+        val deckDao = database.deckDao()
+        val missingParentDecks = fetchMissingParentDecks(
+            uid = uid,
+            deckIds = remoteCards.mapTo(LinkedHashSet()) { it.deckId }
+        )
+
+        val cardDao = database.cardDao()
+        var appliedCount = 0
+
+        database.withTransaction {
+            if (missingParentDecks.isNotEmpty()) {
+                deckDao.upsertDecks(missingParentDecks.map { it.toEntity() })
+            }
+
+            val cardsToUpsert = ArrayList<Card>(remoteCards.size)
+            for (remoteCard in remoteCards) {
+                if (deckDao.getDeckByIdIncludingDeleted(remoteCard.deckId) == null) {
+                    continue
+                }
+                val localCard = cardDao.getCardByIdIncludingDeleted(remoteCard.id)
+                if (localCard == null || remoteCard.updatedAtMillis > localCard.updatedAtMillis) {
+                    // Giữ lại đường dẫn ảnh cục bộ trên máy này nếu ảnh đám mây không thay đổi (Mục 10.1)
+                    val preservedLocalImagePath = if (
+                        localCard != null &&
+                        localCard.cloudImageUrl == remoteCard.cloudImageUrl
+                    ) {
+                        localCard.localImagePath
+                    } else {
+                        null
+                    }
+                    cardsToUpsert.add(remoteCard.copy(localImagePath = preservedLocalImagePath))
+                }
+            }
+            if (cardsToUpsert.isNotEmpty()) {
+                cardDao.upsertCards(cardsToUpsert.map { it.toEntity() })
+                appliedCount = cardsToUpsert.size
+            }
+        }
+
+        return appliedCount
+    }
+
+    /**
+     * Kéo các [ReviewLog] có `updatedAtMillis > lastSyncedAtMillis` từ `users/{uid}/reviewLogs` về Room (Mục 9.1, 10.1 & 10.2).
+     * Truy vấn theo `updatedAtMillis` (luôn >= `reviewedAtMillis`) giúp tải đầy đủ cả lượt ôn mới lẫn lượt vừa Hoàn tác (`isUndone`).
+     */
+    internal suspend fun pullRemoteReviewLogs(uid: String, lastSyncedAtMillis: Long): Int {
+        val snapshot = userDocument(uid)
+            .collection(FirestoreCollections.REVIEW_LOGS)
+            .whereGreaterThan(FirestoreFields.UPDATED_AT_MILLIS, lastSyncedAtMillis)
+            .get()
+            .await()
+
+        val remoteLogs = snapshot.documents
+            .mapNotNull { it.toReviewLog(fallbackOwnerId = uid) }
+            .map { it.copy(ownerId = uid, syncStatus = SyncStatus.SYNCED) }
+        if (remoteLogs.isEmpty()) return 0
+
+        val reviewLogDao = database.reviewLogDao()
+        var appliedCount = 0
+
+        database.withTransaction {
+            val logsToUpsert = ArrayList<ReviewLog>(remoteLogs.size)
+            for (remoteLog in remoteLogs) {
+                val localLog = reviewLogDao.getLogById(remoteLog.id)
+                if (localLog == null) {
+                    logsToUpsert.add(remoteLog)
+                    continue
+                }
+                val remoteTimestamp = maxOf(remoteLog.updatedAtMillis, remoteLog.reviewedAtMillis)
+                val localTimestamp = maxOf(localLog.updatedAtMillis, localLog.reviewedAtMillis)
+                val shouldApplyUndo = remoteLog.isUndone &&
+                    !localLog.isUndone &&
+                    remoteTimestamp >= localTimestamp
+                if (remoteTimestamp > localTimestamp || shouldApplyUndo) {
+                    logsToUpsert.add(remoteLog)
+                }
+            }
+            if (logsToUpsert.isNotEmpty()) {
+                reviewLogDao.upsertLogs(logsToUpsert.map { it.toEntity() })
+                appliedCount = logsToUpsert.size
+            }
+        }
+
+        return appliedCount
+    }
+
+    /**
+     * Kéo các [PracticeSentence] có `updatedAtMillis > lastSyncedAtMillis` từ `users/{uid}/practiceSentences` về Room (Mục 6.7, 8.2 & 10.1).
+     */
+    internal suspend fun pullRemotePracticeSentences(uid: String, lastSyncedAtMillis: Long): Int {
+        val snapshot = userDocument(uid)
+            .collection(FirestoreCollections.PRACTICE_SENTENCES)
+            .whereGreaterThan(FirestoreFields.UPDATED_AT_MILLIS, lastSyncedAtMillis)
+            .get()
+            .await()
+
+        val remoteSentences = snapshot.documents
+            .mapNotNull { it.toPracticeSentence(fallbackOwnerId = uid) }
+            .map { it.copy(ownerId = uid, syncStatus = SyncStatus.SYNCED) }
+        if (remoteSentences.isEmpty()) return 0
+
+        val practiceSentenceDao = database.practiceSentenceDao()
+        var appliedCount = 0
+
+        database.withTransaction {
+            val sentencesToUpsert = ArrayList<PracticeSentence>(remoteSentences.size)
+            for (remoteSentence in remoteSentences) {
+                val localSentence = practiceSentenceDao.getSentenceById(remoteSentence.id)
+                if (
+                    localSentence == null ||
+                    remoteSentence.updatedAtMillis > localSentence.updatedAtMillis
+                ) {
+                    sentencesToUpsert.add(remoteSentence)
+                }
+            }
+            if (sentencesToUpsert.isNotEmpty()) {
+                practiceSentenceDao.upsertSentences(sentencesToUpsert.map { it.toEntity() })
+                appliedCount = sentencesToUpsert.size
+            }
+        }
+
+        return appliedCount
+    }
+
+    /**
+     * Tải bổ sung các [Deck] cha còn thiếu cục bộ trước khi chèn [Card] nhằm tránh lỗi khóa ngoại Room (Mục 10.1).
+     */
+    private suspend fun fetchMissingParentDecks(
+        uid: String,
+        deckIds: Set<String>
+    ): List<Deck> {
+        val deckDao = database.deckDao()
+        val missingIds = deckIds.filter { deckDao.getDeckByIdIncludingDeleted(it) == null }
+        if (missingIds.isEmpty()) return emptyList()
+
+        val decksCollection = userDocument(uid).collection(FirestoreCollections.DECKS)
+        val fetched = ArrayList<Deck>(missingIds.size)
+        for (deckId in missingIds) {
+            val deck = decksCollection
+                .document(deckId)
+                .get()
+                .await()
+                .toDeck(fallbackOwnerId = uid)
+                ?.copy(ownerId = uid, syncStatus = SyncStatus.SYNCED)
+            if (deck != null) {
+                fetched.add(deck)
+            }
+        }
+        return fetched
     }
 
     /**
