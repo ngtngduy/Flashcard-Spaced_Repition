@@ -9,6 +9,7 @@ import com.uth.memora.core.domain.UserPreferencesRepository
 import com.uth.memora.core.model.Card
 import com.uth.memora.core.model.Deck
 import com.uth.memora.core.model.PartOfSpeech
+import com.uth.memora.core.sm2.LearningDayCalculator
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,7 +18,6 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.time.LocalDate
 
 /**
  * ViewModel quản lý màn hình Thêm / Sửa thẻ từ vựng & AI Auto-Fill (Figma 2101:9 & 2227:58, Mục 6.3 & 11):
@@ -56,7 +56,7 @@ class CardEditorViewModel(
     private fun initializeEditor() {
         viewModelScope.launch {
             runCatching {
-                userPreferencesRepository.resetDailyQuotasIfNeeded(LocalDate.now().toEpochDay())
+                userPreferencesRepository.resetDailyQuotasIfNeeded(LearningDayCalculator.toLearningDay())
             }
 
             if (!cardId.isNullOrBlank()) {
@@ -284,8 +284,10 @@ class CardEditorViewModel(
 
             result
                 .onSuccess { autoFillData ->
-                    val remaining = userPreferencesRepository.consumeAutoFillQuota()
-                        .getOrDefault((state.aiAutoFillRemainingToday - 1).coerceAtLeast(0))
+                    // RoomCardRepository.autoFillCardContent đã trừ 1 lượt hạn mức, chỉ đọc lại số lượt còn lại (Bug M2-1)
+                    val remaining = runCatching {
+                        userPreferencesRepository.getUserPreferences().aiAutoFillRemainingToday
+                    }.getOrDefault((state.aiAutoFillRemainingToday - 1).coerceAtLeast(0))
 
                     _uiState.update { current ->
                         current.copy(
@@ -475,8 +477,35 @@ class CardEditorViewModel(
                     }
                 }
             } else {
+                // Nếu người dùng bấm "+ Thêm flashcard" từ Trang chính khi chưa có bộ từ nào ("deck_everyday"),
+                // tự động tạo bộ từ mặc định "Từ vựng hằng ngày" trước khi lưu thẻ (Bug M2-3)
+                val deckExists = state.availableDecks.any { it.deck.id == targetDeckId } ||
+                    runCatching { deckRepository.getDeckById(targetDeckId) }.getOrNull() != null
+                val effectiveDeckId = if (deckExists) {
+                    targetDeckId
+                } else {
+                    val existingFirstDeck = state.availableDecks.firstOrNull()?.deck?.id
+                    if (!existingFirstDeck.isNullOrBlank()) {
+                        existingFirstDeck
+                    } else {
+                        val createdDeck = deckRepository.createDeck(
+                            name = "Từ vựng hằng ngày",
+                            description = "Bộ từ vựng mặc định được tạo tự động khi thêm thẻ nhanh"
+                        ).getOrElse { createErr ->
+                            _uiState.update {
+                                it.copy(
+                                    isSaving = false,
+                                    errorMessage = createErr.message ?: "Không thể tạo bộ từ vựng mặc định."
+                                )
+                            }
+                            return@launch
+                        }
+                        createdDeck.id
+                    }
+                }
+
                 cardRepository.addCard(
-                    deckId = targetDeckId,
+                    deckId = effectiveDeckId,
                     word = trimmedWord,
                     meaning = trimmedMeaning,
                     phonetic = trimmedPhonetic,
@@ -490,6 +519,7 @@ class CardEditorViewModel(
                         if (shouldResetForContinuousAdd) {
                             current.copy(
                                 isSaving = false,
+                                selectedDeckId = effectiveDeckId,
                                 word = "",
                                 phonetic = "",
                                 partOfSpeech = null,
