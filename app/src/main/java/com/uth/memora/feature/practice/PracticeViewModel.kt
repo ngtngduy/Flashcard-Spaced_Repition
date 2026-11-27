@@ -746,14 +746,21 @@ class PracticeViewModel(
     private suspend fun handleSubmittedSentenceResult(savedSentence: PracticeSentence) {
         when (savedSentence.status) {
             SentenceStatus.GRADED -> {
-                val updatedQuota = userPreferencesRepository
-                    .consumeSentenceGradingQuota()
-                    .getOrNull()
+                // RoomPracticeSentenceRepository.submitPracticeSentence() và SentenceGradingWorker
+                // đã gọi consumeSentenceGradingQuota() khi chấm thành công, chỉ đọc lại hạn mức hiện tại (Bug M3-3)
+                val remainingQuota = runCatching {
+                    userPreferencesRepository
+                        .getUserPreferences()
+                        .aiSentenceGradingRemainingToday
+                        .coerceIn(0, PracticeSentence.MAX_DAILY_QUOTA)
+                }.onFailure { error ->
+                    if (error is CancellationException) throw error
+                }.getOrDefault((_uiState.value.remainingDailyQuota - 1).coerceAtLeast(0))
                 _uiState.update { current ->
                     current.copy(
                         isSubmitting = false,
                         inputText = "",
-                        remainingDailyQuota = updatedQuota ?: current.remainingDailyQuota,
+                        remainingDailyQuota = remainingQuota,
                         errorMessage = null
                     )
                 }
