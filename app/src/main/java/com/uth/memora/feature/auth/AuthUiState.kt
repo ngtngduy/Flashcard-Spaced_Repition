@@ -34,7 +34,8 @@ data class AuthUiState(
     val isPasswordVisible: Boolean = false,
     val isConfirmPasswordVisible: Boolean = false,
     val hasLocalGuestData: Boolean = false,
-    val isMergingGuestData: Boolean = false
+    val isMergingGuestData: Boolean = false,
+    val shouldTriggerCloudSync: Boolean = false
 ) {
     /** Hiển thị hộp thoại gộp dữ liệu khách khi đã đăng nhập tài khoản thật và phát hiện dữ liệu Khách cục bộ (Mục 10.1). */
     val showMergeGuestDialog: Boolean

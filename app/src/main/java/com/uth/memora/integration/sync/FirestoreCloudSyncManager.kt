@@ -86,6 +86,52 @@ class FirestoreCloudSyncManager(
     private val syncMutex = Mutex()
 
     /**
+     * Lưu tạm `ownerId` của phiên Khách ẩn danh Firebase (`isAnonymous == true`) ngay trước khi
+     * đăng nhập sang tài khoản chính thức để gộp/xóa chính xác dữ liệu cục bộ (Mục 6.2 & 10.1).
+     */
+    @Volatile
+    private var pendingGuestOwnerId: String? = null
+
+    /**
+     * Ghi nhận `ownerId` của tài khoản Khách trước khi phiên xác thực chuyển sang tài khoản chính thức (Mục 6.2 & 10.1).
+     */
+    fun rememberGuestOwnerId(guestOwnerId: String?) {
+        val cleanId = guestOwnerId?.trim()?.takeIf {
+            it.isNotEmpty() && it != DeckDao.PREBUILT_OWNER_ID
+        }
+        pendingGuestOwnerId = cleanId
+    }
+
+    /**
+     * Kiểm tra tài khoản chính thức [accountId] đã có sẵn dữ liệu học tập trên Cloud Firestore hay chưa
+     * (dùng để quyết định bật hộp thoại `MergeGuestDialog` Figma 2196:16 khi chuyển từ Khách sang đăng nhập) (Mục 6.2 & 10.1).
+     */
+    suspend fun hasRemoteCloudData(accountId: String): Boolean = withContext(ioDispatcher) {
+        val cleanAccountId = accountId.trim()
+        if (
+            cleanAccountId.isEmpty() ||
+            cleanAccountId == Deck.GUEST_OWNER_ID ||
+            cleanAccountId == DeckDao.PREBUILT_OWNER_ID
+        ) {
+            return@withContext false
+        }
+
+        val userDoc = userDocument(cleanAccountId)
+        val hasDecks = !userDoc.collection(FirestoreCollections.DECKS)
+            .limit(1)
+            .get()
+            .await()
+            .isEmpty
+        if (hasDecks) return@withContext true
+
+        !userDoc.collection(FirestoreCollections.CARDS)
+            .limit(1)
+            .get()
+            .await()
+            .isEmpty
+    }
+
+    /**
      * Đồng bộ 2 chiều (Pull → Push → Dọn xóa mềm 30 ngày) dữ liệu học tập của tài khoản chính thức
      * với Cloud Firestore (Mục 8.3 & Mục 10.1).
      *
@@ -112,34 +158,11 @@ class FirestoreCloudSyncManager(
                     .getUserPreferences()
                     .lastSyncedAtMillis ?: 0L
 
-                // 1. Pull trước để so sánh Last-Write-Wins với bản cục bộ trước khi đẩy lên (Mục 8.3 & 10.1)
-                val pulledDecksCount = pullRemoteDecks(uid, lastSyncedAtMillis)
-                val pulledCardsCount = pullRemoteCards(uid, lastSyncedAtMillis)
-                val pulledReviewLogsCount = pullRemoteReviewLogs(uid, lastSyncedAtMillis)
-                val pulledPracticeSentencesCount = pullRemotePracticeSentences(uid, lastSyncedAtMillis)
-                val totalPulledCount = pulledDecksCount +
-                    pulledCardsCount +
-                    pulledReviewLogsCount +
-                    pulledPracticeSentencesCount
-
-                // 2. Push các thay đổi cục bộ còn PENDING_SYNC (gồm bản cục bộ thắng LWW) theo thứ tự tham chiếu (Mục 8.3 & 10.1)
-                val pushedDecksCount = pushPendingDecks(uid)
-                val pushedCardsCount = pushPendingCards(uid)
-                val pushedReviewLogsCount = pushPendingReviewLogs(uid)
-                val pushedPracticeSentencesCount = pushPendingPracticeSentences(uid)
-                val totalPushedCount = pushedDecksCount +
-                    pushedCardsCount +
-                    pushedReviewLogsCount +
-                    pushedPracticeSentencesCount
-
-                // 3. Dọn vĩnh viễn bản ghi xóa mềm đã SYNCED cũ hơn 30 ngày khỏi Room (Mục 10.1)
-                val now = nowProvider()
-                purgeExpiredSoftDeletedRecords(now)
-
-                // 4. Ghi nhận mốc đồng bộ mới nhất sau khi hoàn tất cả Pull, Push & Dọn rác (Mục 10.1 & 13)
-                userPreferencesRepository.setLastSyncedAtMillis(now)
-
-                Result.success(totalPulledCount + totalPushedCount)
+                val totalSyncedCount = runTwoWaySyncUnlocked(
+                    uid = uid,
+                    sinceMillis = lastSyncedAtMillis
+                )
+                Result.success(totalSyncedCount)
             } catch (e: CancellationException) {
                 // Không nuốt tín hiệu hủy coroutine có chủ đích từ ViewModel / Worker
                 throw e
@@ -150,14 +173,150 @@ class FirestoreCloudSyncManager(
     }
 
     /**
-     * Gộp hoặc bỏ dữ liệu chế độ khách vào tài khoản đăng nhập (Mục 6.2 & Mục 10.1).
-     * Sẽ được triển khai chi tiết ở bước gộp dữ liệu khách tiếp theo.
+     * Gộp hoặc xóa dữ liệu chế độ Khách cục bộ khi chuyển sang tài khoản chính thức [accountId] (Mục 6.2 & Mục 10.1 · Figma 2196:16).
+     *
+     * - `discardGuestData = false` ("Gộp vào tài khoản"): chuyển `ownerId` của toàn bộ dữ liệu Khách
+     *   (`guest_local` và/hoặc UID ẩn danh trước đó) sang [accountId] với `SyncStatus.PENDING_SYNC`,
+     *   sau đó thực hiện đồng bộ 2 chiều đầy đủ (Pull toàn bộ dữ liệu Cloud về + Push dữ liệu Khách lên Firestore).
+     * - `discardGuestData = true` ("Bỏ dữ liệu khách"): xóa toàn bộ dữ liệu Khách khỏi 4 bảng Room
+     *   (giữ nguyên bộ từ mẫu `prebuilt_catalog`), sau đó kéo toàn bộ dữ liệu trên Cloud của [accountId] về máy.
      */
     override suspend fun mergeGuestDataIntoAccount(
         accountId: String,
         discardGuestData: Boolean
-    ): Result<Unit> {
-        return Result.success(Unit)
+    ): Result<Unit> = syncMutex.withLock {
+        withContext(ioDispatcher) {
+            val cleanAccountId = accountId.trim()
+            if (
+                cleanAccountId.isEmpty() ||
+                cleanAccountId == Deck.GUEST_OWNER_ID ||
+                cleanAccountId == DeckDao.PREBUILT_OWNER_ID
+            ) {
+                return@withContext Result.failure(
+                    IllegalArgumentException(ERROR_NOT_AUTHENTICATED_VI)
+                )
+            }
+
+            try {
+                val guestOwnerIds = collectGuestOwnerIdsForMerge(cleanAccountId)
+                val now = nowProvider()
+
+                if (discardGuestData) {
+                    // Xóa sạch dữ liệu Khách trong 4 bảng Room theo đúng thứ tự con -> cha (Mục 6.2 & 10.1)
+                    database.withTransaction {
+                        for (guestOwnerId in guestOwnerIds) {
+                            database.practiceSentenceDao().deleteAllByOwner(guestOwnerId)
+                            database.reviewLogDao().deleteAllByOwner(guestOwnerId)
+                            database.cardDao().deleteAllByOwner(guestOwnerId)
+                            database.deckDao().deleteAllByOwner(guestOwnerId)
+                        }
+                    }
+                } else {
+                    // Gộp dữ liệu Khách: chuyển ownerId sang tài khoản chính thức & đặt PENDING_SYNC để đẩy lên Cloud (Mục 6.2 & 10.1)
+                    database.withTransaction {
+                        for (guestOwnerId in guestOwnerIds) {
+                            database.deckDao().reassignOwner(
+                                fromOwnerId = guestOwnerId,
+                                toOwnerId = cleanAccountId,
+                                updatedAtMillis = now,
+                                syncStatus = SyncStatus.PENDING_SYNC
+                            )
+                            database.cardDao().reassignOwner(
+                                fromOwnerId = guestOwnerId,
+                                toOwnerId = cleanAccountId,
+                                updatedAtMillis = now,
+                                syncStatus = SyncStatus.PENDING_SYNC
+                            )
+                            database.reviewLogDao().reassignOwner(
+                                fromOwnerId = guestOwnerId,
+                                toOwnerId = cleanAccountId,
+                                updatedAtMillis = now,
+                                syncStatus = SyncStatus.PENDING_SYNC
+                            )
+                            database.practiceSentenceDao().reassignOwner(
+                                fromOwnerId = guestOwnerId,
+                                toOwnerId = cleanAccountId,
+                                updatedAtMillis = now,
+                                syncStatus = SyncStatus.PENDING_SYNC
+                            )
+                        }
+                    }
+                }
+
+                // Chạy đồng bộ 2 chiều đầy đủ (sinceMillis = 0L) để tải toàn bộ dữ liệu Cloud và đẩy dữ liệu vừa gộp lên (Mục 10.1)
+                runTwoWaySyncUnlocked(
+                    uid = cleanAccountId,
+                    sinceMillis = 0L
+                )
+
+                pendingGuestOwnerId = null
+                Result.success(Unit)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Result.failure(mapSyncException(e))
+            }
+        }
+    }
+
+    /**
+     * Thực thi chu trình đồng bộ 2 chiều Pull → Push → Dọn xóa mềm 30 ngày → Lưu `lastSyncedAtMillis`
+     * (chỉ gọi bên trong `syncMutex.withLock`) (Mục 8.3 & Mục 10.1).
+     */
+    private suspend fun runTwoWaySyncUnlocked(
+        uid: String,
+        sinceMillis: Long
+    ): Int {
+        // 1. Pull trước để so sánh Last-Write-Wins với bản cục bộ trước khi đẩy lên (Mục 8.3 & 10.1)
+        val pulledDecksCount = pullRemoteDecks(uid, sinceMillis)
+        val pulledCardsCount = pullRemoteCards(uid, sinceMillis)
+        val pulledReviewLogsCount = pullRemoteReviewLogs(uid, sinceMillis)
+        val pulledPracticeSentencesCount = pullRemotePracticeSentences(uid, sinceMillis)
+        val totalPulledCount = pulledDecksCount +
+            pulledCardsCount +
+            pulledReviewLogsCount +
+            pulledPracticeSentencesCount
+
+        // 2. Push các thay đổi cục bộ còn PENDING_SYNC (gồm bản cục bộ thắng LWW hoặc vừa gộp từ Khách) (Mục 8.3 & 10.1)
+        val pushedDecksCount = pushPendingDecks(uid)
+        val pushedCardsCount = pushPendingCards(uid)
+        val pushedReviewLogsCount = pushPendingReviewLogs(uid)
+        val pushedPracticeSentencesCount = pushPendingPracticeSentences(uid)
+        val totalPushedCount = pushedDecksCount +
+            pushedCardsCount +
+            pushedReviewLogsCount +
+            pushedPracticeSentencesCount
+
+        // 3. Dọn vĩnh viễn bản ghi xóa mềm đã SYNCED cũ hơn 30 ngày khỏi Room (Mục 10.1)
+        val now = nowProvider()
+        purgeExpiredSoftDeletedRecords(now)
+
+        // 4. Ghi nhận mốc đồng bộ mới nhất sau khi hoàn tất cả Pull, Push & Dọn rác (Mục 10.1 & 13)
+        userPreferencesRepository.setLastSyncedAtMillis(now)
+
+        return totalPulledCount + totalPushedCount
+    }
+
+    /**
+     * Tập hợp danh sách `ownerId` chế độ Khách cần gộp/xóa (luôn bao gồm `guest_local` và UID ẩn danh trước đó nếu có),
+     * đảm bảo không bao giờ đụng vào [targetAccountId] hoặc bộ từ mẫu `prebuilt_catalog` (Mục 6.2 & 10.1).
+     */
+    private suspend fun collectGuestOwnerIdsForMerge(targetAccountId: String): Set<String> {
+        val candidates = LinkedHashSet<String>()
+        candidates.add(Deck.GUEST_OWNER_ID)
+
+        pendingGuestOwnerId
+            ?.takeIf { it.isNotBlank() && it != targetAccountId && it != DeckDao.PREBUILT_OWNER_ID }
+            ?.let { candidates.add(it) }
+
+        val currentUser = runCatching { authRepository.getCurrentUser() }.getOrNull()
+        if (currentUser != null && currentUser.isAnonymous) {
+            val anonUid = currentUser.uid.trim()
+            if (anonUid.isNotEmpty() && anonUid != targetAccountId && anonUid != DeckDao.PREBUILT_OWNER_ID) {
+                candidates.add(anonUid)
+            }
+        }
+        return candidates
     }
 
     /**
