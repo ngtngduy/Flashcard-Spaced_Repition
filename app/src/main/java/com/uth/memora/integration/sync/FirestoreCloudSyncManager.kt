@@ -15,6 +15,8 @@ import com.uth.memora.core.domain.CloudSyncManager
 import com.uth.memora.core.domain.UserPreferencesRepository
 import com.uth.memora.core.model.Card
 import com.uth.memora.core.model.Deck
+import com.uth.memora.core.model.PracticeSentence
+import com.uth.memora.core.model.ReviewLog
 import com.uth.memora.core.model.SyncStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -35,9 +37,11 @@ import java.io.IOException
  * - `users/{uid}/reviewLogs/{id}`
  * - `users/{uid}/practiceSentences/{id}`
  *
- * Bước G2 hiện thực đẩy (Push) theo lô (`WriteBatch` tối đa 450 bản ghi/lô với `SetOptions.merge()`)
- * cho `Deck` và `Card` đang có `syncStatus == PENDING_SYNC`, sau đó cập nhật `SyncStatus.SYNCED`
- * trong Room Database trong transaction mà vẫn giữ nguyên `updatedAtMillis` gốc để bảo toàn LWW.
+ * Hiện thực đẩy (Push) theo lô (`WriteBatch` tối đa 450 bản ghi/lô với `SetOptions.merge()`)
+ * cho cả 4 bảng `Deck`, `Card`, `ReviewLog` và `PracticeSentence` đang có `syncStatus == PENDING_SYNC`,
+ * sau đó cập nhật `SyncStatus.SYNCED` trong Room Database trong transaction mà vẫn giữ nguyên
+ * `updatedAtMillis` gốc để bảo toàn Last-Write-Wins. Tài khoản Khách (`isAnonymous == true`)
+ * được bỏ qua push/pull cho đến khi đăng nhập tài khoản chính thức.
  */
 class FirestoreCloudSyncManager(
     private val authRepository: AuthRepository,
@@ -53,28 +57,34 @@ class FirestoreCloudSyncManager(
     private val syncMutex = Mutex()
 
     /**
-     * Đồng bộ các thay đổi đang chờ (`PENDING_SYNC`) của tài khoản hiện tại lên Cloud Firestore (Mục 8.3 & Mục 10.1).
+     * Đồng bộ các thay đổi đang chờ (`PENDING_SYNC`) của tài khoản chính thức lên Cloud Firestore (Mục 8.3 & Mục 10.1).
      *
      * Thứ tự thực hiện:
-     * 1. Xác thực người dùng đã đăng nhập tài khoản chính thức (không đồng bộ ở chế độ khách).
+     * 1. Nếu chưa đăng nhập hoặc đang ở chế độ Khách (`isAnonymous == true`) -> bỏ qua push/pull, trả `Result.success(0)`.
      * 2. Đẩy toàn bộ `Deck` đang `PENDING_SYNC` trước để bảo đảm quan hệ tham chiếu bộ -> thẻ.
      * 3. Đẩy toàn bộ `Card` đang `PENDING_SYNC` (bao gồm cả thẻ xóa mềm `isDeleted = true`).
-     * 4. Cập nhật mốc `lastSyncedAtMillis` vào DataStore sau khi đồng bộ thành công.
+     * 4. Đẩy toàn bộ `ReviewLog` (lịch sử ôn tập SM-2 & cờ `isUndone`) đang `PENDING_SYNC`.
+     * 5. Đẩy toàn bộ `PracticeSentence` (lịch sử đặt câu & kết quả chấm AI) đang `PENDING_SYNC`.
+     * 6. Cập nhật mốc `lastSyncedAtMillis` vào DataStore sau khi đồng bộ thành công.
      *
      * @return [Result.success] kèm tổng số bản ghi đã đẩy thành công, hoặc [Result.failure] với thông báo tiếng Việt.
      */
     override suspend fun syncPendingChanges(): Result<Int> = syncMutex.withLock {
         withContext(ioDispatcher) {
             try {
+                // Tài khoản Khách (isAnonymous == true) hoặc chưa đăng nhập -> bỏ qua push/pull (Mục 6.2 & 10.1)
                 val uid = resolveAuthenticatedUid()
-                    ?: return@withContext Result.failure(
-                        IllegalStateException(ERROR_NOT_AUTHENTICATED_VI)
-                    )
+                    ?: return@withContext Result.success(0)
 
-                // Đẩy Deck trước rồi mới đẩy Card để giữ nhất quán dữ liệu bộ từ - thẻ (Mục 8.3 & 10.1)
+                // Đẩy theo thứ tự tham chiếu: Deck -> Card -> ReviewLog -> PracticeSentence (Mục 8.3 & 10.1)
                 val pushedDecksCount = pushPendingDecks(uid)
                 val pushedCardsCount = pushPendingCards(uid)
-                val totalSyncedCount = pushedDecksCount + pushedCardsCount
+                val pushedReviewLogsCount = pushPendingReviewLogs(uid)
+                val pushedPracticeSentencesCount = pushPendingPracticeSentences(uid)
+                val totalSyncedCount = pushedDecksCount +
+                    pushedCardsCount +
+                    pushedReviewLogsCount +
+                    pushedPracticeSentencesCount
 
                 userPreferencesRepository.setLastSyncedAtMillis(nowProvider())
                 Result.success(totalSyncedCount)
@@ -155,6 +165,62 @@ class FirestoreCloudSyncManager(
     }
 
     /**
+     * Đẩy các [ReviewLog] có `syncStatus == PENDING_SYNC` lên `users/{uid}/reviewLogs/{id}` theo lô (Mục 8.3, 10.1 & 10.2).
+     * Bảo toàn đầy đủ `snapshotBeforeReview`, `isUndone`, `reviewedAtMillis` và `updatedAtMillis`.
+     */
+    internal suspend fun pushPendingReviewLogs(uid: String): Int {
+        val reviewLogDao = database.reviewLogDao()
+        val pendingLogs = reviewLogDao.getPendingSyncReviewLogs(uid).map { it.toDomain() }
+        if (pendingLogs.isEmpty()) return 0
+
+        val reviewLogsCollection = userDocument(uid).collection(FirestoreCollections.REVIEW_LOGS)
+        var syncedCount = 0
+
+        for (chunk in pendingLogs.chunked(MAX_FIRESTORE_BATCH_SIZE)) {
+            val batch = firestore.batch()
+            for (log in chunk) {
+                val docRef = reviewLogsCollection.document(log.id)
+                val payload = log.copy(syncStatus = SyncStatus.SYNCED).toFirestoreMap()
+                batch.set(docRef, payload, SetOptions.merge())
+            }
+            batch.commit().await()
+
+            markReviewLogsSyncedInRoom(chunk)
+            syncedCount += chunk.size
+        }
+
+        return syncedCount
+    }
+
+    /**
+     * Đẩy các [PracticeSentence] có `syncStatus == PENDING_SYNC` lên `users/{uid}/practiceSentences/{id}` theo lô (Mục 6.7, 8.2 & 10.1).
+     * Bảo toàn trạng thái chấm AI (`status`), điểm số, nhận xét tiếng Việt, phân tích ngữ pháp và câu sửa.
+     */
+    internal suspend fun pushPendingPracticeSentences(uid: String): Int {
+        val practiceSentenceDao = database.practiceSentenceDao()
+        val pendingSentences = practiceSentenceDao.getPendingSyncSentences(uid).map { it.toDomain() }
+        if (pendingSentences.isEmpty()) return 0
+
+        val sentencesCollection = userDocument(uid).collection(FirestoreCollections.PRACTICE_SENTENCES)
+        var syncedCount = 0
+
+        for (chunk in pendingSentences.chunked(MAX_FIRESTORE_BATCH_SIZE)) {
+            val batch = firestore.batch()
+            for (sentence in chunk) {
+                val docRef = sentencesCollection.document(sentence.id)
+                val payload = sentence.copy(syncStatus = SyncStatus.SYNCED).toFirestoreMap()
+                batch.set(docRef, payload, SetOptions.merge())
+            }
+            batch.commit().await()
+
+            markPracticeSentencesSyncedInRoom(chunk)
+            syncedCount += chunk.size
+        }
+
+        return syncedCount
+    }
+
+    /**
      * Cập nhật `syncStatus = SYNCED` cho lô [Deck] trong Room, giữ nguyên `updatedAtMillis` gốc
      * và bỏ qua nếu người dùng vừa sửa bản ghi cục bộ trong lúc đang tải lên (Mục 10.1).
      */
@@ -194,6 +260,54 @@ class FirestoreCloudSyncManager(
                         id = card.id,
                         syncStatus = SyncStatus.SYNCED,
                         updatedAtMillis = card.updatedAtMillis
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Cập nhật `syncStatus = SYNCED` cho lô [ReviewLog] trong Room, giữ nguyên `updatedAtMillis` gốc
+     * và không ghi đè nếu lượt ôn vừa bị Hoàn tác (`isUndone`) trong lúc đang đẩy lên đám mây (Mục 9.1 & 10.1).
+     */
+    private suspend fun markReviewLogsSyncedInRoom(pushedLogs: List<ReviewLog>) {
+        val reviewLogDao = database.reviewLogDao()
+        database.withTransaction {
+            for (log in pushedLogs) {
+                val current = reviewLogDao.getLogById(log.id) ?: continue
+                if (
+                    current.syncStatus == SyncStatus.PENDING_SYNC &&
+                    current.updatedAtMillis == log.updatedAtMillis &&
+                    current.isUndone == log.isUndone
+                ) {
+                    reviewLogDao.updateSyncStatus(
+                        id = log.id,
+                        syncStatus = SyncStatus.SYNCED,
+                        updatedAtMillis = log.updatedAtMillis
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Cập nhật `syncStatus = SYNCED` cho lô [PracticeSentence] trong Room, giữ nguyên `updatedAtMillis` gốc
+     * và không ghi đè nếu AI vừa chấm xong kết quả mới trong lúc đang đẩy lên đám mây (Mục 8.2 & 10.1).
+     */
+    private suspend fun markPracticeSentencesSyncedInRoom(pushedSentences: List<PracticeSentence>) {
+        val practiceSentenceDao = database.practiceSentenceDao()
+        database.withTransaction {
+            for (sentence in pushedSentences) {
+                val current = practiceSentenceDao.getSentenceById(sentence.id) ?: continue
+                if (
+                    current.syncStatus == SyncStatus.PENDING_SYNC &&
+                    current.updatedAtMillis == sentence.updatedAtMillis &&
+                    current.status == sentence.status
+                ) {
+                    practiceSentenceDao.updateSyncStatus(
+                        id = sentence.id,
+                        syncStatus = SyncStatus.SYNCED,
+                        updatedAtMillis = sentence.updatedAtMillis
                     )
                 }
             }
