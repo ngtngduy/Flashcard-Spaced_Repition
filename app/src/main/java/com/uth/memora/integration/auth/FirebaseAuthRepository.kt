@@ -1,5 +1,6 @@
 package com.uth.memora.integration.auth
 
+import android.util.Log
 import androidx.room.withTransaction
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.FirebaseTooManyRequestsException
@@ -12,6 +13,7 @@ import com.google.firebase.auth.FirebaseAuthWeakPasswordException
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
+import com.uth.memora.BuildConfig
 import com.uth.memora.core.database.MemoraDatabase
 import com.uth.memora.core.database.dao.DeckDao
 import com.uth.memora.core.datastore.UserPreferencesDataStore
@@ -307,25 +309,30 @@ class FirebaseAuthRepository(
         const val ERROR_SIGN_OUT_UNKNOWN_VI: String =
             "Không thể hoàn tất đăng xuất và dọn dữ liệu cục bộ. Vui lòng thử lại."
 
+        private const val LOG_TAG: String = "FirebaseAuthRepo"
+
         private val EMAIL_REGEX: Regex =
             Regex("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")
 
         /**
          * Chuẩn hóa lỗi đăng nhập sang thông báo tiếng Việt thân thiện, không tiết lộ email tồn tại (Mục 6.2).
+         * Bảo mật: không giữ `cause` gốc từ Firebase để tránh rò rỉ email cá nhân/token qua stacktrace;
+         * chỉ ghi mã lỗi và tên class khi `BuildConfig.DEBUG`.
          */
         internal fun mapSignInException(throwable: Throwable): Exception {
+            logDebugAuthFailure(operation = "signInWithEmail", throwable = throwable)
             return when (throwable) {
                 is FirebaseAuthInvalidCredentialsException,
                 is FirebaseAuthInvalidUserException -> {
-                    Exception(ERROR_INVALID_CREDENTIALS_VI, throwable)
+                    Exception(ERROR_INVALID_CREDENTIALS_VI)
                 }
 
                 is FirebaseTooManyRequestsException -> {
-                    Exception(ERROR_TOO_MANY_REQUESTS_VI, throwable)
+                    Exception(ERROR_TOO_MANY_REQUESTS_VI)
                 }
 
                 is FirebaseNetworkException -> {
-                    Exception(ERROR_NETWORK_VI, throwable)
+                    Exception(ERROR_NETWORK_VI)
                 }
 
                 is FirebaseAuthException -> {
@@ -335,11 +342,11 @@ class FirebaseAuthRepository(
                         "ERROR_USER_NOT_FOUND",
                         "ERROR_INVALID_CREDENTIAL",
                         "ERROR_INVALID_LOGIN_CREDENTIALS",
-                        "ERROR_USER_MISMATCH" -> Exception(ERROR_INVALID_CREDENTIALS_VI, throwable)
+                        "ERROR_USER_MISMATCH" -> Exception(ERROR_INVALID_CREDENTIALS_VI)
 
-                        "ERROR_TOO_MANY_REQUESTS" -> Exception(ERROR_TOO_MANY_REQUESTS_VI, throwable)
-                        "ERROR_NETWORK_REQUEST_FAILED" -> Exception(ERROR_NETWORK_VI, throwable)
-                        "ERROR_OPERATION_NOT_ALLOWED" -> Exception(ERROR_OPERATION_NOT_ALLOWED_VI, throwable)
+                        "ERROR_TOO_MANY_REQUESTS" -> Exception(ERROR_TOO_MANY_REQUESTS_VI)
+                        "ERROR_NETWORK_REQUEST_FAILED" -> Exception(ERROR_NETWORK_VI)
+                        "ERROR_OPERATION_NOT_ALLOWED" -> Exception(ERROR_OPERATION_NOT_ALLOWED_VI)
                         else -> mapGenericAuthException(
                             throwable = throwable,
                             treatInvalidLoginAsGenericCredentials = true,
@@ -360,35 +367,36 @@ class FirebaseAuthRepository(
          * Chuẩn hóa lỗi đăng ký tài khoản sang thông báo tiếng Việt thân thiện (Mục 6.2).
          */
         internal fun mapRegisterException(throwable: Throwable): Exception {
+            logDebugAuthFailure(operation = "registerWithEmail", throwable = throwable)
             return when (throwable) {
                 is FirebaseAuthUserCollisionException -> {
-                    Exception(ERROR_EMAIL_IN_USE_VI, throwable)
+                    Exception(ERROR_EMAIL_IN_USE_VI)
                 }
 
                 is FirebaseAuthWeakPasswordException -> {
-                    Exception(ERROR_WEAK_PASSWORD_VI, throwable)
+                    Exception(ERROR_WEAK_PASSWORD_VI)
                 }
 
                 is FirebaseAuthInvalidCredentialsException -> {
-                    Exception(ERROR_INVALID_EMAIL_VI, throwable)
+                    Exception(ERROR_INVALID_EMAIL_VI)
                 }
 
                 is FirebaseTooManyRequestsException -> {
-                    Exception(ERROR_TOO_MANY_REQUESTS_VI, throwable)
+                    Exception(ERROR_TOO_MANY_REQUESTS_VI)
                 }
 
                 is FirebaseNetworkException -> {
-                    Exception(ERROR_NETWORK_VI, throwable)
+                    Exception(ERROR_NETWORK_VI)
                 }
 
                 is FirebaseAuthException -> {
                     when (throwable.errorCode) {
-                        "ERROR_EMAIL_ALREADY_IN_USE" -> Exception(ERROR_EMAIL_IN_USE_VI, throwable)
-                        "ERROR_WEAK_PASSWORD" -> Exception(ERROR_WEAK_PASSWORD_VI, throwable)
-                        "ERROR_INVALID_EMAIL" -> Exception(ERROR_INVALID_EMAIL_VI, throwable)
-                        "ERROR_TOO_MANY_REQUESTS" -> Exception(ERROR_TOO_MANY_REQUESTS_VI, throwable)
-                        "ERROR_NETWORK_REQUEST_FAILED" -> Exception(ERROR_NETWORK_VI, throwable)
-                        "ERROR_OPERATION_NOT_ALLOWED" -> Exception(ERROR_OPERATION_NOT_ALLOWED_VI, throwable)
+                        "ERROR_EMAIL_ALREADY_IN_USE" -> Exception(ERROR_EMAIL_IN_USE_VI)
+                        "ERROR_WEAK_PASSWORD" -> Exception(ERROR_WEAK_PASSWORD_VI)
+                        "ERROR_INVALID_EMAIL" -> Exception(ERROR_INVALID_EMAIL_VI)
+                        "ERROR_TOO_MANY_REQUESTS" -> Exception(ERROR_TOO_MANY_REQUESTS_VI)
+                        "ERROR_NETWORK_REQUEST_FAILED" -> Exception(ERROR_NETWORK_VI)
+                        "ERROR_OPERATION_NOT_ALLOWED" -> Exception(ERROR_OPERATION_NOT_ALLOWED_VI)
                         else -> mapGenericAuthException(
                             throwable = throwable,
                             treatInvalidLoginAsGenericCredentials = false,
@@ -409,46 +417,47 @@ class FirebaseAuthRepository(
          * Chuẩn hóa lỗi đăng nhập Google sang thông báo tiếng Việt thân thiện (Mục 6.2).
          */
         internal fun mapGoogleSignInException(throwable: Throwable): Exception {
+            logDebugAuthFailure(operation = "signInWithGoogle", throwable = throwable)
             return when (throwable) {
                 is FirebaseAuthUserCollisionException -> {
-                    Exception(ERROR_ACCOUNT_EXISTS_DIFFERENT_CREDENTIAL_VI, throwable)
+                    Exception(ERROR_ACCOUNT_EXISTS_DIFFERENT_CREDENTIAL_VI)
                 }
 
                 is FirebaseAuthInvalidCredentialsException -> {
-                    Exception(ERROR_INVALID_GOOGLE_TOKEN_VI, throwable)
+                    Exception(ERROR_INVALID_GOOGLE_TOKEN_VI)
                 }
 
                 is FirebaseAuthInvalidUserException -> {
-                    Exception(ERROR_USER_DISABLED_VI, throwable)
+                    Exception(ERROR_USER_DISABLED_VI)
                 }
 
                 is FirebaseTooManyRequestsException -> {
-                    Exception(ERROR_TOO_MANY_REQUESTS_VI, throwable)
+                    Exception(ERROR_TOO_MANY_REQUESTS_VI)
                 }
 
                 is FirebaseNetworkException -> {
-                    Exception(ERROR_NETWORK_VI, throwable)
+                    Exception(ERROR_NETWORK_VI)
                 }
 
                 is FirebaseAuthException -> {
                     when (throwable.errorCode) {
                         "ERROR_ACCOUNT_EXISTS_WITH_DIFFERENT_CREDENTIAL" ->
-                            Exception(ERROR_ACCOUNT_EXISTS_DIFFERENT_CREDENTIAL_VI, throwable)
+                            Exception(ERROR_ACCOUNT_EXISTS_DIFFERENT_CREDENTIAL_VI)
 
                         "ERROR_INVALID_CREDENTIAL" ->
-                            Exception(ERROR_INVALID_GOOGLE_TOKEN_VI, throwable)
+                            Exception(ERROR_INVALID_GOOGLE_TOKEN_VI)
 
                         "ERROR_USER_DISABLED" ->
-                            Exception(ERROR_USER_DISABLED_VI, throwable)
+                            Exception(ERROR_USER_DISABLED_VI)
 
                         "ERROR_OPERATION_NOT_ALLOWED" ->
-                            Exception(ERROR_GOOGLE_OPERATION_NOT_ALLOWED_VI, throwable)
+                            Exception(ERROR_GOOGLE_OPERATION_NOT_ALLOWED_VI)
 
                         "ERROR_TOO_MANY_REQUESTS" ->
-                            Exception(ERROR_TOO_MANY_REQUESTS_VI, throwable)
+                            Exception(ERROR_TOO_MANY_REQUESTS_VI)
 
                         "ERROR_NETWORK_REQUEST_FAILED" ->
-                            Exception(ERROR_NETWORK_VI, throwable)
+                            Exception(ERROR_NETWORK_VI)
 
                         else -> mapGenericAuthException(
                             throwable = throwable,
@@ -470,6 +479,7 @@ class FirebaseAuthRepository(
          * Chuẩn hóa lỗi gửi email đặt lại mật khẩu sang thông báo tiếng Việt thân thiện (Mục 6.2).
          */
         internal fun mapPasswordResetException(throwable: Throwable): Exception {
+            logDebugAuthFailure(operation = "sendPasswordResetEmail", throwable = throwable)
             return when (throwable) {
                 is FirebaseAuthInvalidUserException -> {
                     val message = if (throwable.errorCode == "ERROR_USER_DISABLED") {
@@ -477,29 +487,29 @@ class FirebaseAuthRepository(
                     } else {
                         ERROR_USER_NOT_FOUND_VI
                     }
-                    Exception(message, throwable)
+                    Exception(message)
                 }
 
                 is FirebaseAuthInvalidCredentialsException -> {
-                    Exception(ERROR_INVALID_EMAIL_VI, throwable)
+                    Exception(ERROR_INVALID_EMAIL_VI)
                 }
 
                 is FirebaseTooManyRequestsException -> {
-                    Exception(ERROR_TOO_MANY_REQUESTS_VI, throwable)
+                    Exception(ERROR_TOO_MANY_REQUESTS_VI)
                 }
 
                 is FirebaseNetworkException -> {
-                    Exception(ERROR_NETWORK_VI, throwable)
+                    Exception(ERROR_NETWORK_VI)
                 }
 
                 is FirebaseAuthException -> {
                     when (throwable.errorCode) {
-                        "ERROR_USER_NOT_FOUND" -> Exception(ERROR_USER_NOT_FOUND_VI, throwable)
-                        "ERROR_USER_DISABLED" -> Exception(ERROR_USER_DISABLED_VI, throwable)
-                        "ERROR_INVALID_EMAIL" -> Exception(ERROR_INVALID_EMAIL_VI, throwable)
-                        "ERROR_TOO_MANY_REQUESTS" -> Exception(ERROR_TOO_MANY_REQUESTS_VI, throwable)
-                        "ERROR_NETWORK_REQUEST_FAILED" -> Exception(ERROR_NETWORK_VI, throwable)
-                        "ERROR_OPERATION_NOT_ALLOWED" -> Exception(ERROR_OPERATION_NOT_ALLOWED_VI, throwable)
+                        "ERROR_USER_NOT_FOUND" -> Exception(ERROR_USER_NOT_FOUND_VI)
+                        "ERROR_USER_DISABLED" -> Exception(ERROR_USER_DISABLED_VI)
+                        "ERROR_INVALID_EMAIL" -> Exception(ERROR_INVALID_EMAIL_VI)
+                        "ERROR_TOO_MANY_REQUESTS" -> Exception(ERROR_TOO_MANY_REQUESTS_VI)
+                        "ERROR_NETWORK_REQUEST_FAILED" -> Exception(ERROR_NETWORK_VI)
+                        "ERROR_OPERATION_NOT_ALLOWED" -> Exception(ERROR_OPERATION_NOT_ALLOWED_VI)
                         else -> mapGenericAuthException(
                             throwable = throwable,
                             treatInvalidLoginAsGenericCredentials = false,
@@ -520,28 +530,29 @@ class FirebaseAuthRepository(
          * Chuẩn hóa lỗi đăng nhập ẩn danh (chế độ Khách) sang thông báo tiếng Việt thân thiện (Mục 6.2).
          */
         internal fun mapAnonymousSignInException(throwable: Throwable): Exception {
+            logDebugAuthFailure(operation = "signInAnonymously", throwable = throwable)
             return when (throwable) {
                 is FirebaseAuthInvalidUserException -> {
-                    Exception(ERROR_USER_DISABLED_VI, throwable)
+                    Exception(ERROR_USER_DISABLED_VI)
                 }
 
                 is FirebaseTooManyRequestsException -> {
-                    Exception(ERROR_TOO_MANY_REQUESTS_VI, throwable)
+                    Exception(ERROR_TOO_MANY_REQUESTS_VI)
                 }
 
                 is FirebaseNetworkException -> {
-                    Exception(ERROR_NETWORK_VI, throwable)
+                    Exception(ERROR_NETWORK_VI)
                 }
 
                 is FirebaseAuthException -> {
                     when (throwable.errorCode) {
                         "ERROR_OPERATION_NOT_ALLOWED",
                         "ERROR_ADMIN_RESTRICTED_OPERATION" ->
-                            Exception(ERROR_ANONYMOUS_OPERATION_NOT_ALLOWED_VI, throwable)
+                            Exception(ERROR_ANONYMOUS_OPERATION_NOT_ALLOWED_VI)
 
-                        "ERROR_USER_DISABLED" -> Exception(ERROR_USER_DISABLED_VI, throwable)
-                        "ERROR_TOO_MANY_REQUESTS" -> Exception(ERROR_TOO_MANY_REQUESTS_VI, throwable)
-                        "ERROR_NETWORK_REQUEST_FAILED" -> Exception(ERROR_NETWORK_VI, throwable)
+                        "ERROR_USER_DISABLED" -> Exception(ERROR_USER_DISABLED_VI)
+                        "ERROR_TOO_MANY_REQUESTS" -> Exception(ERROR_TOO_MANY_REQUESTS_VI)
+                        "ERROR_NETWORK_REQUEST_FAILED" -> Exception(ERROR_NETWORK_VI)
                         else -> mapGenericAuthException(
                             throwable = throwable,
                             treatInvalidLoginAsGenericCredentials = false,
@@ -562,9 +573,10 @@ class FirebaseAuthRepository(
          * Chuẩn hóa lỗi khi đăng xuất và dọn dữ liệu cục bộ (Mục 6.2 & 9.7).
          */
         internal fun mapSignOutException(throwable: Throwable): Exception {
+            logDebugAuthFailure(operation = "signOut", throwable = throwable)
             return when (throwable) {
-                is FirebaseNetworkException -> Exception(ERROR_NETWORK_VI, throwable)
-                is FirebaseAuthInvalidUserException -> Exception(ERROR_USER_DISABLED_VI, throwable)
+                is FirebaseNetworkException -> Exception(ERROR_NETWORK_VI)
+                is FirebaseAuthInvalidUserException -> Exception(ERROR_USER_DISABLED_VI)
                 else -> mapGenericAuthException(
                     throwable = throwable,
                     treatInvalidLoginAsGenericCredentials = false,
@@ -592,7 +604,7 @@ class FirebaseAuthRepository(
                         combinedMessage.contains("user_not_found")
                     )
             ) {
-                return Exception(ERROR_INVALID_CREDENTIALS_VI, throwable)
+                return Exception(ERROR_INVALID_CREDENTIALS_VI)
             }
 
             if (
@@ -601,7 +613,7 @@ class FirebaseAuthRepository(
                 combinedMessage.contains("too many requests") ||
                 combinedMessage.contains("quota")
             ) {
-                return Exception(ERROR_TOO_MANY_REQUESTS_VI, throwable)
+                return Exception(ERROR_TOO_MANY_REQUESTS_VI)
             }
 
             if (
@@ -612,10 +624,25 @@ class FirebaseAuthRepository(
                 combinedMessage.contains("timeout") ||
                 combinedMessage.contains("timed out")
             ) {
-                return Exception(ERROR_NETWORK_VI, throwable)
+                return Exception(ERROR_NETWORK_VI)
             }
 
-            return Exception(fallbackMessage, throwable)
+            return Exception(fallbackMessage)
+        }
+
+        /**
+         * Chỉ ghi mã lỗi Firebase và tên class khi `BuildConfig.DEBUG == true`; tuyệt đối không in email hay idToken.
+         */
+        private fun logDebugAuthFailure(
+            operation: String,
+            throwable: Throwable
+        ) {
+            if (!BuildConfig.DEBUG) return
+            val errorCode = (throwable as? FirebaseAuthException)?.errorCode ?: "NONE"
+            val className = throwable::class.java.simpleName.ifBlank { "Throwable" }
+            runCatching {
+                Log.w(LOG_TAG, "$operation failed [errorCode=$errorCode, class=$className]")
+            }
         }
     }
 }

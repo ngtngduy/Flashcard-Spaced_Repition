@@ -3,6 +3,7 @@ package com.uth.memora.integration.auth
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.util.Log
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
@@ -15,6 +16,7 @@ import androidx.credentials.exceptions.NoCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
+import com.uth.memora.BuildConfig
 import com.uth.memora.R
 import kotlinx.coroutines.CancellationException
 import java.io.IOException
@@ -164,17 +166,23 @@ class GoogleSignInHelper(
             // Không nuốt tín hiệu hủy coroutine có chủ đích
             throw e
         } catch (e: GetCredentialCancellationException) {
-            Result.failure(GoogleSignInException.Cancelled(cause = e))
+            logDebugCredentialFailure(e)
+            Result.failure(GoogleSignInException.Cancelled())
         } catch (e: NoCredentialException) {
-            Result.failure(GoogleSignInException.NoCredential(cause = e))
+            logDebugCredentialFailure(e)
+            Result.failure(GoogleSignInException.NoCredential())
         } catch (e: GetCredentialProviderConfigurationException) {
-            Result.failure(GoogleSignInException.ProviderUnavailable(cause = e))
+            logDebugCredentialFailure(e)
+            Result.failure(GoogleSignInException.ProviderUnavailable())
         } catch (e: GetCredentialUnsupportedException) {
-            Result.failure(GoogleSignInException.ProviderUnavailable(cause = e))
+            logDebugCredentialFailure(e)
+            Result.failure(GoogleSignInException.ProviderUnavailable())
         } catch (e: GetCredentialInterruptedException) {
-            Result.failure(GoogleSignInException.Interrupted(cause = e))
+            logDebugCredentialFailure(e)
+            Result.failure(GoogleSignInException.Interrupted())
         } catch (e: GoogleIdTokenParsingException) {
-            Result.failure(GoogleSignInException.InvalidCredential(cause = e))
+            logDebugCredentialFailure(e)
+            Result.failure(GoogleSignInException.InvalidCredential())
         } catch (e: GetCredentialException) {
             Result.failure(mapGenericCredentialException(e))
         } catch (e: Exception) {
@@ -199,13 +207,16 @@ class GoogleSignInHelper(
                     Result.success(token)
                 }
             } catch (e: GoogleIdTokenParsingException) {
-                Result.failure(GoogleSignInException.InvalidCredential(cause = e))
+                logDebugCredentialFailure(e)
+                Result.failure(GoogleSignInException.InvalidCredential())
             }
         }
         return Result.failure(GoogleSignInException.InvalidCredential())
     }
 
     companion object {
+        private const val LOG_TAG: String = "GoogleSignInHelper"
+
         /**
          * Đọc `R.string.default_web_client_id` an toàn (trả về chuỗi rỗng nếu chưa có cấu hình).
          */
@@ -233,6 +244,7 @@ class GoogleSignInHelper(
 
         internal fun mapGenericCredentialException(throwable: Throwable): GoogleSignInException {
             if (throwable is GoogleSignInException) return throwable
+            logDebugCredentialFailure(throwable)
 
             val causeChain = generateSequence(throwable) { it.cause }.toList()
             val combinedMessage = causeChain
@@ -245,7 +257,7 @@ class GoogleSignInHelper(
                 combinedMessage.contains("too many requests") ||
                 combinedMessage.contains("rate limit")
             ) {
-                return GoogleSignInException.RateLimited(cause = throwable)
+                return GoogleSignInException.RateLimited()
             }
 
             if (
@@ -255,10 +267,22 @@ class GoogleSignInHelper(
                 combinedMessage.contains("timeout") ||
                 combinedMessage.contains("timed out")
             ) {
-                return GoogleSignInException.NetworkUnavailable(cause = throwable)
+                return GoogleSignInException.NetworkUnavailable()
             }
 
-            return GoogleSignInException.Unknown(cause = throwable)
+            return GoogleSignInException.Unknown()
+        }
+
+        /**
+         * Chỉ ghi tên class và mã loại ngoại lệ Credential khi `BuildConfig.DEBUG == true`; không bao giờ in idToken.
+         */
+        private fun logDebugCredentialFailure(throwable: Throwable) {
+            if (!BuildConfig.DEBUG) return
+            val credentialType = (throwable as? GetCredentialException)?.type ?: "NONE"
+            val className = throwable::class.java.simpleName.ifBlank { "Throwable" }
+            runCatching {
+                Log.w(LOG_TAG, "getGoogleIdToken failed [type=$credentialType, class=$className]")
+            }
         }
     }
 }

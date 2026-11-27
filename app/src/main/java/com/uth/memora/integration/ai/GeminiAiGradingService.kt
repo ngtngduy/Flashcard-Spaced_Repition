@@ -1,5 +1,6 @@
 package com.uth.memora.integration.ai
 
+import android.util.Log
 import com.google.ai.client.generativeai.type.GoogleGenerativeAIException
 import com.uth.memora.BuildConfig
 import com.uth.memora.core.domain.AiGradingService
@@ -184,25 +185,20 @@ class GeminiAiGradingService internal constructor(
                 }
             }
         } catch (e: TimeoutCancellationException) {
-            return Result.failure(AiGradingException.Timeout(cause = e))
+            return Result.failure(mapToGradingException(e))
         } catch (e: CancellationException) {
             // Không nuốt tín hiệu hủy coroutine có chủ đích từ ViewModel/WorkManager
             throw e
         } catch (e: SocketTimeoutException) {
-            return Result.failure(AiGradingException.Timeout(cause = e))
+            return Result.failure(mapToGradingException(e))
         } catch (e: UnknownHostException) {
-            return Result.failure(AiGradingException.NetworkUnavailable(cause = e))
+            return Result.failure(mapToGradingException(e))
         } catch (e: IOException) {
             return Result.failure(mapToGradingException(e))
         } catch (e: AiJsonParseException) {
-            return Result.failure(
-                AiGradingException.InvalidJsonFormat(
-                    message = e.message ?: AiGradingException.ERROR_INVALID_JSON_VI,
-                    cause = e
-                )
-            )
+            return Result.failure(mapToGradingException(e))
         } catch (e: JSONException) {
-            return Result.failure(AiGradingException.InvalidJsonFormat(cause = e))
+            return Result.failure(mapToGradingException(e))
         } catch (e: GoogleGenerativeAIException) {
             return Result.failure(mapToGradingException(e))
         } catch (e: Exception) {
@@ -213,12 +209,7 @@ class GeminiAiGradingService internal constructor(
         return AiJsonParser.parseEvaluationResult(rawResponseText).fold(
             onSuccess = { Result.success(it) },
             onFailure = { error ->
-                Result.failure(
-                    AiGradingException.InvalidJsonFormat(
-                        message = error.message ?: AiGradingException.ERROR_INVALID_JSON_VI,
-                        cause = error
-                    )
-                )
+                Result.failure(mapToGradingException(error))
             }
         )
     }
@@ -227,6 +218,8 @@ class GeminiAiGradingService internal constructor(
         "GeminiAiGradingService(modelProvider=$modelProvider, timeoutMillis=$timeoutMillis)"
 
     companion object {
+        private const val LOG_TAG: String = "GeminiAiGrading"
+
         /** Thời gian chờ tối đa 30 giây cho mỗi lần chấm câu AI (Mục 9.5). */
         const val REQUEST_TIMEOUT_MILLIS: Long = 30_000L
 
@@ -243,95 +236,94 @@ class GeminiAiGradingService internal constructor(
         /**
          * Phân loại ngoại lệ phát sinh trong quá trình gọi Gemini AI sang [AiGradingException]
          * kèm thông báo tiếng Việt thân thiện (Mục 9.5).
+         *
+         * Bảo mật: không giữ `cause` gốc từ SDK/HTTP để tránh rò rỉ `GEMINI_API_KEY`
+         * hay HTTP header qua stacktrace/Logcat; chỉ ghi mã lỗi & tên class khi `BuildConfig.DEBUG`.
          */
         internal fun mapToGradingException(throwable: Throwable): AiGradingException {
             if (throwable is AiGradingException) return throwable
 
             val causeChain = generateSequence(throwable) { it.cause }.toList()
-            val className = throwable::class.java.simpleName
+            val className = throwable::class.java.simpleName.ifBlank { "Throwable" }
             val combinedMessage = causeChain
                 .mapNotNull { it.message }
                 .joinToString(separator = " ")
                 .lowercase()
 
-            // 1. Timeout (withTimeout hoặc SocketTimeoutException từ tầng mạng)
-            if (
+            val mapped: AiGradingException = when {
+                // 1. Timeout (withTimeout hoặc SocketTimeoutException từ tầng mạng)
                 throwable is TimeoutCancellationException ||
-                causeChain.any { it is SocketTimeoutException }
-            ) {
-                return AiGradingException.Timeout(cause = throwable)
-            }
+                    causeChain.any { it is SocketTimeoutException } ->
+                    AiGradingException.Timeout()
 
-            // 2. Mất mạng / không phân giải được tên miền (UnknownHostException)
-            if (causeChain.any { it is UnknownHostException }) {
-                return AiGradingException.NetworkUnavailable(cause = throwable)
-            }
+                // 2. Mất mạng / không phân giải được tên miền (UnknownHostException)
+                causeChain.any { it is UnknownHostException } ->
+                    AiGradingException.NetworkUnavailable()
 
-            // 3. Lỗi phân tích JSON sai định dạng
-            if (
-                throwable is AiJsonParseException ||
-                causeChain.any { it is JSONException }
-            ) {
-                return AiGradingException.InvalidJsonFormat(
-                    message = throwable.message ?: AiGradingException.ERROR_INVALID_JSON_VI,
-                    cause = throwable
-                )
-            }
+                // 3. Lỗi phân tích JSON sai định dạng (chỉ giữ thông điệp tiếng Việt của AiJsonParseException)
+                throwable is AiJsonParseException ->
+                    AiGradingException.InvalidJsonFormat(
+                        message = throwable.message ?: AiGradingException.ERROR_INVALID_JSON_VI
+                    )
 
-            // 4. Lỗi hết hạn mức / giới hạn tốc độ gọi HTTP 429 (Quota / Rate limit)
-            if (
+                causeChain.any { it is JSONException } ->
+                    AiGradingException.InvalidJsonFormat()
+
+                // 4. Lỗi hết hạn mức / giới hạn tốc độ gọi HTTP 429 (Quota / Rate limit)
                 className.contains("Quota", ignoreCase = true) ||
-                combinedMessage.contains("429") ||
-                combinedMessage.contains("resource_exhausted") ||
-                combinedMessage.contains("quota") ||
-                combinedMessage.contains("rate limit") ||
-                combinedMessage.contains("too many requests")
-            ) {
-                return AiGradingException.RateLimited(cause = throwable)
-            }
+                    combinedMessage.contains("429") ||
+                    combinedMessage.contains("resource_exhausted") ||
+                    combinedMessage.contains("quota") ||
+                    combinedMessage.contains("rate limit") ||
+                    combinedMessage.contains("too many requests") ->
+                    AiGradingException.RateLimited()
 
-            // 5. Lỗi khóa API không hợp lệ hoặc không có quyền (401 / 403)
-            if (
+                // 5. Lỗi khóa API không hợp lệ hoặc không có quyền (401 / 403)
                 className.contains("InvalidAPIKey", ignoreCase = true) ||
-                combinedMessage.contains("api key") ||
-                combinedMessage.contains("api_key") ||
-                combinedMessage.contains("401") ||
-                combinedMessage.contains("403") ||
-                combinedMessage.contains("unauthenticated") ||
-                combinedMessage.contains("permission_denied")
-            ) {
-                return AiGradingException.InvalidApiKey(cause = throwable)
-            }
+                    combinedMessage.contains("api key") ||
+                    combinedMessage.contains("api_key") ||
+                    combinedMessage.contains("401") ||
+                    combinedMessage.contains("403") ||
+                    combinedMessage.contains("unauthenticated") ||
+                    combinedMessage.contains("permission_denied") ->
+                    AiGradingException.InvalidApiKey()
 
-            // 6. Lỗi mất mạng / gián đoạn đường truyền (IOException hoặc lỗi kết nối tương đương)
-            if (
+                // 6. Lỗi mất mạng / gián đoạn đường truyền (IOException hoặc lỗi kết nối tương đương)
                 causeChain.any { it is IOException } ||
-                combinedMessage.contains("unable to resolve host") ||
-                combinedMessage.contains("no address associated") ||
-                combinedMessage.contains("failed to connect") ||
-                combinedMessage.contains("connection refused") ||
-                combinedMessage.contains("network") ||
-                combinedMessage.contains("socket")
-            ) {
-                return AiGradingException.NetworkUnavailable(cause = throwable)
-            }
+                    combinedMessage.contains("unable to resolve host") ||
+                    combinedMessage.contains("no address associated") ||
+                    combinedMessage.contains("failed to connect") ||
+                    combinedMessage.contains("connection refused") ||
+                    combinedMessage.contains("network") ||
+                    combinedMessage.contains("socket") ->
+                    AiGradingException.NetworkUnavailable()
 
-            // 7. Lỗi timeout được báo qua thông điệp từ SDK
-            if (combinedMessage.contains("timed out") || combinedMessage.contains("timeout")) {
-                return AiGradingException.Timeout(cause = throwable)
-            }
+                // 7. Lỗi timeout được báo qua thông điệp từ SDK
+                combinedMessage.contains("timed out") || combinedMessage.contains("timeout") ->
+                    AiGradingException.Timeout()
 
-            // 8. Lỗi phản hồi bị chặn hoặc sai cấu trúc dữ liệu từ phía Gemini SDK
-            if (
+                // 8. Lỗi phản hồi bị chặn hoặc sai cấu trúc dữ liệu từ phía Gemini SDK
                 className.contains("Serialization", ignoreCase = true) ||
-                className.contains("ResponseStopped", ignoreCase = true) ||
-                className.contains("PromptBlocked", ignoreCase = true) ||
-                combinedMessage.contains("json")
-            ) {
-                return AiGradingException.InvalidJsonFormat(cause = throwable)
+                    className.contains("ResponseStopped", ignoreCase = true) ||
+                    className.contains("PromptBlocked", ignoreCase = true) ||
+                    combinedMessage.contains("json") ->
+                    AiGradingException.InvalidJsonFormat()
+
+                else -> AiGradingException.Unknown()
             }
 
-            return AiGradingException.Unknown(cause = throwable)
+            logDebugFailure(errorType = mapped.type, causeClassName = className)
+            return mapped
+        }
+
+        private fun logDebugFailure(
+            errorType: AiGradingErrorType,
+            causeClassName: String
+        ) {
+            if (!BuildConfig.DEBUG) return
+            runCatching {
+                Log.w(LOG_TAG, "evaluateSentence failed [type=$errorType, class=$causeClassName]")
+            }
         }
     }
 }
