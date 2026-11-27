@@ -6,10 +6,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.uth.memora.MemoraApplication
 import com.uth.memora.core.model.StudyMode
+import com.uth.memora.core.model.UserPreferences
 import com.uth.memora.memoraViewModelFactory
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
 /**
@@ -38,6 +43,14 @@ fun StudyRoute(
     )
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val appContext = LocalContext.current.applicationContext
+    val userPreferencesRepository = remember(appContext) {
+        (appContext as? MemoraApplication)?.container?.userPreferencesRepository
+    }
+    val userPreferencesFlow: Flow<UserPreferences?> = remember(userPreferencesRepository) {
+        userPreferencesRepository?.observeUserPreferences() ?: flowOf(null)
+    }
+    val userPreferences by userPreferencesFlow.collectAsStateWithLifecycle(initialValue = null)
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
 
@@ -53,7 +66,11 @@ fun StudyRoute(
         uiState = uiState,
         onFlipCard = viewModel::toggleFlip,
         onRateCard = viewModel::submitRating,
-        onSpeakWord = speakWord,
+        onSpeakWord = { word ->
+            if (userPreferences?.isSoundEnabled != false) {
+                speakWord(word)
+            }
+        },
         onRetry = viewModel::loadQueue,
         onFinishSession = onFinishSession,
         onBack = onBack,
