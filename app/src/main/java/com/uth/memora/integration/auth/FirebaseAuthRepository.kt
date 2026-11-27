@@ -1,5 +1,6 @@
 package com.uth.memora.integration.auth
 
+import androidx.room.withTransaction
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.FirebaseTooManyRequestsException
 import com.google.firebase.auth.FirebaseAuth
@@ -11,25 +12,37 @@ import com.google.firebase.auth.FirebaseAuthWeakPasswordException
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
+import com.uth.memora.core.database.MemoraDatabase
+import com.uth.memora.core.database.dao.DeckDao
+import com.uth.memora.core.datastore.UserPreferencesDataStore
 import com.uth.memora.core.domain.AuthRepository
+import com.uth.memora.core.domain.UserPreferencesRepository
 import com.uth.memora.core.model.UserAccount
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import java.io.IOException
 
 /**
  * ============================================================================
- * KHU VỰC CỦA THÀNH VIÊN 3: XÁC THỰC NGƯỜI DÙNG FIREBASE AUTH (Mục 6.2)
+ * KHU VỰC CỦA THÀNH VIÊN 3: XÁC THỰC NGƯỜI DÙNG FIREBASE AUTH (Mục 6.2 & 9.7)
  * ============================================================================
  * Hiện thực [AuthRepository] sử dụng [FirebaseAuth] và `kotlinx-coroutines-play-services` (`.await()`).
- * Luôn chuẩn hóa lỗi mạng, giới hạn tần suất (429) và ẩn thông tin tồn tại tài khoản khi đăng nhập sai.
+ * Luôn chuẩn hóa lỗi mạng, giới hạn tần suất (429), ẩn thông tin tồn tại tài khoản khi đăng nhập sai,
+ * và dọn sạch dữ liệu cục bộ của tài khoản trong Room + DataStore khi đăng xuất.
  */
 class FirebaseAuthRepository(
-    private val auth: FirebaseAuth = FirebaseAuth.getInstance()
+    private val auth: FirebaseAuth = FirebaseAuth.getInstance(),
+    private val database: MemoraDatabase? = null,
+    private val userPreferencesRepository: UserPreferencesRepository? = null,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : AuthRepository {
 
     /**
@@ -142,15 +155,95 @@ class FirebaseAuthRepository(
         }
     }
 
-    // Các phương thức dưới đây sẽ được hiện thực ở bước tiếp theo của nhánh m3/auth (Mục 6.2)
-    override suspend fun sendPasswordResetEmail(email: String): Result<Unit> =
-        Result.failure(UnsupportedOperationException(ERROR_NOT_IMPLEMENTED_YET_VI))
+    /**
+     * Gửi email đặt lại mật khẩu tới địa chỉ email đã đăng ký (Mục 6.2).
+     */
+    override suspend fun sendPasswordResetEmail(email: String): Result<Unit> {
+        val cleanEmail = email.trim()
+        if (cleanEmail.isEmpty()) {
+            return Result.failure(IllegalArgumentException(ERROR_EMPTY_EMAIL_VI))
+        }
+        if (!EMAIL_REGEX.matches(cleanEmail)) {
+            return Result.failure(IllegalArgumentException(ERROR_INVALID_EMAIL_VI))
+        }
 
-    override suspend fun signInAnonymously(): Result<UserAccount> =
-        Result.failure(UnsupportedOperationException(ERROR_NOT_IMPLEMENTED_YET_VI))
+        return try {
+            auth.sendPasswordResetEmail(cleanEmail).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(mapPasswordResetException(e))
+        }
+    }
 
-    override suspend fun signOut(): Result<Unit> =
-        Result.failure(UnsupportedOperationException(ERROR_NOT_IMPLEMENTED_YET_VI))
+    /**
+     * Đăng nhập ẩn danh ở chế độ dùng thử (Khách) trên Firebase Auth (Mục 6.2).
+     */
+    override suspend fun signInAnonymously(): Result<UserAccount> {
+        return try {
+            val authResult = auth.signInAnonymously().await()
+            val firebaseUser = authResult.user
+                ?: return Result.failure(IllegalStateException(ERROR_ANONYMOUS_SIGN_IN_UNKNOWN_VI))
+            Result.success(firebaseUser.toUserAccount().copy(isAnonymous = true))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(mapAnonymousSignInException(e))
+        }
+    }
+
+    /**
+     * Đăng xuất khỏi Firebase Auth đồng thời dọn sạch dữ liệu cục bộ của tài khoản vừa đăng xuất
+     * trong Room Database (4 bảng) và đặt lại thông số phiên người dùng trong DataStore
+     * để tránh người dùng sau nhìn thấy dữ liệu cũ trên máy dùng chung (Mục 6.2 & 9.7).
+     */
+    override suspend fun signOut(): Result<Unit> {
+        val signedOutOwnerId = auth.currentUser?.uid?.takeIf { it.isNotBlank() }
+
+        return try {
+            auth.signOut()
+
+            // Dùng NonCancellable để bảo đảm xóa sạch dữ liệu nhạy cảm ngay cả khi UI điều hướng và hủy scope
+            withContext(NonCancellable + ioDispatcher) {
+                clearLocalAccountData(signedOutOwnerId)
+                clearSessionPreferences()
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(mapSignOutException(e))
+        }
+    }
+
+    /**
+     * Xóa toàn bộ bản ghi thuộc [ownerId] vừa đăng xuất trong 4 bảng Room theo đúng thứ tự khóa ngoại,
+     * giữ nguyên bộ từ mẫu (`prebuilt_catalog`) của ứng dụng (Mục 6.2 & 9.7).
+     */
+    private suspend fun clearLocalAccountData(ownerId: String?) {
+        val db = database ?: return
+        if (ownerId.isNullOrBlank() || ownerId == DeckDao.PREBUILT_OWNER_ID) return
+
+        db.withTransaction {
+            db.practiceSentenceDao().deleteAllByOwner(ownerId)
+            db.reviewLogDao().deleteAllByOwner(ownerId)
+            db.cardDao().deleteAllByOwner(ownerId)
+            db.deckDao().deleteAllByOwner(ownerId)
+        }
+    }
+
+    /**
+     * Đặt lại thông số phiên người dùng (streak, khiên bảo vệ, hạn mức AI, mốc đồng bộ)
+     * trong DataStore, giữ nguyên cài đặt thiết bị (Mục 6.2 & 9.7).
+     */
+    private suspend fun clearSessionPreferences() {
+        when (val prefsRepo = userPreferencesRepository) {
+            is UserPreferencesDataStore -> prefsRepo.clearSessionOnSignOut().getOrThrow()
+            null -> Unit
+            else -> prefsRepo.updateStreak(streak = 0, isFrozen = false).getOrThrow()
+        }
+    }
 
     /**
      * Ánh xạ [FirebaseUser] sang domain model [UserAccount] (Mục 6.2).
@@ -175,8 +268,12 @@ class FirebaseAuthRepository(
             "Email hoặc mật khẩu không đúng"
         const val ERROR_EMPTY_SIGN_IN_FIELDS_VI: String =
             "Vui lòng nhập đầy đủ email và mật khẩu."
+        const val ERROR_EMPTY_EMAIL_VI: String =
+            "Vui lòng nhập địa chỉ email."
         const val ERROR_INVALID_EMAIL_VI: String =
             "Định dạng email không hợp lệ. Vui lòng kiểm tra lại."
+        const val ERROR_USER_NOT_FOUND_VI: String =
+            "Không tìm thấy tài khoản nào được đăng ký với địa chỉ email này."
         const val ERROR_WEAK_PASSWORD_VI: String =
             "Mật khẩu phải có từ 8 ký tự trở lên."
         const val ERROR_EMAIL_IN_USE_VI: String =
@@ -189,6 +286,8 @@ class FirebaseAuthRepository(
             "Phương thức xác thực bằng email hiện chưa được bật trên hệ thống."
         const val ERROR_GOOGLE_OPERATION_NOT_ALLOWED_VI: String =
             "Phương thức đăng nhập bằng Google hiện chưa được bật trên hệ thống."
+        const val ERROR_ANONYMOUS_OPERATION_NOT_ALLOWED_VI: String =
+            "Chế độ dùng thử ẩn danh hiện chưa được bật trên hệ thống."
         const val ERROR_INVALID_GOOGLE_TOKEN_VI: String =
             "Phiên xác thực Google không hợp lệ hoặc đã hết hạn. Vui lòng thử lại."
         const val ERROR_ACCOUNT_EXISTS_DIFFERENT_CREDENTIAL_VI: String =
@@ -201,9 +300,12 @@ class FirebaseAuthRepository(
             "Không thể tạo tài khoản lúc này. Vui lòng thử lại sau."
         const val ERROR_GOOGLE_SIGN_IN_UNKNOWN_VI: String =
             "Không thể đăng nhập bằng Google lúc này. Vui lòng thử lại sau."
-
-        private const val ERROR_NOT_IMPLEMENTED_YET_VI: String =
-            "Chức năng xác thực này chưa được kích hoạt."
+        const val ERROR_PASSWORD_RESET_UNKNOWN_VI: String =
+            "Không thể gửi email đặt lại mật khẩu lúc này. Vui lòng thử lại sau."
+        const val ERROR_ANONYMOUS_SIGN_IN_UNKNOWN_VI: String =
+            "Không thể khởi tạo chế độ dùng thử lúc này. Vui lòng thử lại sau."
+        const val ERROR_SIGN_OUT_UNKNOWN_VI: String =
+            "Không thể hoàn tất đăng xuất và dọn dữ liệu cục bộ. Vui lòng thử lại."
 
         private val EMAIL_REGEX: Regex =
             Regex("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")
@@ -360,6 +462,113 @@ class FirebaseAuthRepository(
                     throwable = throwable,
                     treatInvalidLoginAsGenericCredentials = false,
                     fallbackMessage = ERROR_GOOGLE_SIGN_IN_UNKNOWN_VI
+                )
+            }
+        }
+
+        /**
+         * Chuẩn hóa lỗi gửi email đặt lại mật khẩu sang thông báo tiếng Việt thân thiện (Mục 6.2).
+         */
+        internal fun mapPasswordResetException(throwable: Throwable): Exception {
+            return when (throwable) {
+                is FirebaseAuthInvalidUserException -> {
+                    val message = if (throwable.errorCode == "ERROR_USER_DISABLED") {
+                        ERROR_USER_DISABLED_VI
+                    } else {
+                        ERROR_USER_NOT_FOUND_VI
+                    }
+                    Exception(message, throwable)
+                }
+
+                is FirebaseAuthInvalidCredentialsException -> {
+                    Exception(ERROR_INVALID_EMAIL_VI, throwable)
+                }
+
+                is FirebaseTooManyRequestsException -> {
+                    Exception(ERROR_TOO_MANY_REQUESTS_VI, throwable)
+                }
+
+                is FirebaseNetworkException -> {
+                    Exception(ERROR_NETWORK_VI, throwable)
+                }
+
+                is FirebaseAuthException -> {
+                    when (throwable.errorCode) {
+                        "ERROR_USER_NOT_FOUND" -> Exception(ERROR_USER_NOT_FOUND_VI, throwable)
+                        "ERROR_USER_DISABLED" -> Exception(ERROR_USER_DISABLED_VI, throwable)
+                        "ERROR_INVALID_EMAIL" -> Exception(ERROR_INVALID_EMAIL_VI, throwable)
+                        "ERROR_TOO_MANY_REQUESTS" -> Exception(ERROR_TOO_MANY_REQUESTS_VI, throwable)
+                        "ERROR_NETWORK_REQUEST_FAILED" -> Exception(ERROR_NETWORK_VI, throwable)
+                        "ERROR_OPERATION_NOT_ALLOWED" -> Exception(ERROR_OPERATION_NOT_ALLOWED_VI, throwable)
+                        else -> mapGenericAuthException(
+                            throwable = throwable,
+                            treatInvalidLoginAsGenericCredentials = false,
+                            fallbackMessage = ERROR_PASSWORD_RESET_UNKNOWN_VI
+                        )
+                    }
+                }
+
+                else -> mapGenericAuthException(
+                    throwable = throwable,
+                    treatInvalidLoginAsGenericCredentials = false,
+                    fallbackMessage = ERROR_PASSWORD_RESET_UNKNOWN_VI
+                )
+            }
+        }
+
+        /**
+         * Chuẩn hóa lỗi đăng nhập ẩn danh (chế độ Khách) sang thông báo tiếng Việt thân thiện (Mục 6.2).
+         */
+        internal fun mapAnonymousSignInException(throwable: Throwable): Exception {
+            return when (throwable) {
+                is FirebaseAuthInvalidUserException -> {
+                    Exception(ERROR_USER_DISABLED_VI, throwable)
+                }
+
+                is FirebaseTooManyRequestsException -> {
+                    Exception(ERROR_TOO_MANY_REQUESTS_VI, throwable)
+                }
+
+                is FirebaseNetworkException -> {
+                    Exception(ERROR_NETWORK_VI, throwable)
+                }
+
+                is FirebaseAuthException -> {
+                    when (throwable.errorCode) {
+                        "ERROR_OPERATION_NOT_ALLOWED",
+                        "ERROR_ADMIN_RESTRICTED_OPERATION" ->
+                            Exception(ERROR_ANONYMOUS_OPERATION_NOT_ALLOWED_VI, throwable)
+
+                        "ERROR_USER_DISABLED" -> Exception(ERROR_USER_DISABLED_VI, throwable)
+                        "ERROR_TOO_MANY_REQUESTS" -> Exception(ERROR_TOO_MANY_REQUESTS_VI, throwable)
+                        "ERROR_NETWORK_REQUEST_FAILED" -> Exception(ERROR_NETWORK_VI, throwable)
+                        else -> mapGenericAuthException(
+                            throwable = throwable,
+                            treatInvalidLoginAsGenericCredentials = false,
+                            fallbackMessage = ERROR_ANONYMOUS_SIGN_IN_UNKNOWN_VI
+                        )
+                    }
+                }
+
+                else -> mapGenericAuthException(
+                    throwable = throwable,
+                    treatInvalidLoginAsGenericCredentials = false,
+                    fallbackMessage = ERROR_ANONYMOUS_SIGN_IN_UNKNOWN_VI
+                )
+            }
+        }
+
+        /**
+         * Chuẩn hóa lỗi khi đăng xuất và dọn dữ liệu cục bộ (Mục 6.2 & 9.7).
+         */
+        internal fun mapSignOutException(throwable: Throwable): Exception {
+            return when (throwable) {
+                is FirebaseNetworkException -> Exception(ERROR_NETWORK_VI, throwable)
+                is FirebaseAuthInvalidUserException -> Exception(ERROR_USER_DISABLED_VI, throwable)
+                else -> mapGenericAuthException(
+                    throwable = throwable,
+                    treatInvalidLoginAsGenericCredentials = false,
+                    fallbackMessage = ERROR_SIGN_OUT_UNKNOWN_VI
                 )
             }
         }
