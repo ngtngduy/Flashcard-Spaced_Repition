@@ -1,5 +1,6 @@
 package com.uth.memora.integration.sync
 
+import android.content.Context
 import androidx.room.withTransaction
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.FirebaseTooManyRequestsException
@@ -58,9 +59,29 @@ class FirestoreCloudSyncManager(
     @Suppress("unused")
     private val storage: FirebaseStorage = FirebaseStorage.getInstance(),
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val imageUploader: ImageUploader? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val nowProvider: () -> Long = { System.currentTimeMillis() }
 ) : CloudSyncManager {
+
+    /**
+     * Hàm khởi tạo tiện lợi nhận [Context] để tự tạo [ImageUploader] dùng chung [FirebaseStorage] (Mục 10.1 & 11).
+     */
+    constructor(
+        context: Context,
+        authRepository: AuthRepository,
+        database: MemoraDatabase,
+        firestore: FirebaseFirestore = FirebaseFirestore.getInstance(),
+        storage: FirebaseStorage = FirebaseStorage.getInstance(),
+        userPreferencesRepository: UserPreferencesRepository
+    ) : this(
+        authRepository = authRepository,
+        database = database,
+        firestore = firestore,
+        storage = storage,
+        userPreferencesRepository = userPreferencesRepository,
+        imageUploader = ImageUploader(context = context, storage = storage)
+    )
 
     private val syncMutex = Mutex()
 
@@ -168,7 +189,11 @@ class FirestoreCloudSyncManager(
     }
 
     /**
-     * Đẩy các [Card] có `syncStatus == PENDING_SYNC` lên `users/{uid}/cards/{id}` theo lô (Mục 8.3 & 10.1).
+     * Đẩy các [Card] có `syncStatus == PENDING_SYNC` lên `users/{uid}/cards/{id}` theo lô (Mục 8.3, 10.1 & 11).
+     *
+     * Trước khi đẩy từng thẻ lên Firestore, nếu thẻ chưa bị xóa và có `localImagePath != null` nhưng
+     * `cloudImageUrl == null`, sẽ gọi [ImageUploader] nén <= 500 KB (max 1280px), tải lên
+     * `users/{uid}/card_images/{cardId}.jpg` và lưu `cloudImageUrl` vào `CardEntity` trước khi ghi Firestore.
      * Chỉ đánh dấu `SYNCED` trong Room sau khi batch commit Firestore thành công.
      */
     internal suspend fun pushPendingCards(uid: String): Int {
@@ -180,19 +205,63 @@ class FirestoreCloudSyncManager(
         var syncedCount = 0
 
         for (chunk in pendingCards.chunked(MAX_FIRESTORE_BATCH_SIZE)) {
-            val batch = firestore.batch()
+            // Tải ảnh minh họa (nếu có) lên Firebase Storage và cập nhật cloudImageUrl vào Room trước khi push (Mục 10.1 & 11)
+            val preparedChunk = ArrayList<Card>(chunk.size)
             for (card in chunk) {
+                preparedChunk.add(uploadCardImageIfNeeded(uid, card))
+            }
+
+            val batch = firestore.batch()
+            for (card in preparedChunk) {
                 val docRef = cardsCollection.document(card.id)
                 val payload = card.copy(syncStatus = SyncStatus.SYNCED).toFirestoreMap()
                 batch.set(docRef, payload, SetOptions.merge())
             }
             batch.commit().await()
 
-            markCardsSyncedInRoom(chunk)
-            syncedCount += chunk.size
+            markCardsSyncedInRoom(preparedChunk)
+            syncedCount += preparedChunk.size
         }
 
         return syncedCount
+    }
+
+    /**
+     * Khi thẻ chưa bị xóa có `localImagePath != null` và `cloudImageUrl == null`, nén & tải ảnh lên
+     * Firebase Storage, cập nhật `cloudImageUrl` vào `CardEntity` cục bộ rồi trả về [Card] đã cập nhật (Mục 10.1 & 11).
+     */
+    private suspend fun uploadCardImageIfNeeded(uid: String, card: Card): Card {
+        val uploader = imageUploader ?: return card
+        val localPath = card.localImagePath?.takeIf { it.isNotBlank() } ?: return card
+        if (card.isDeleted || !card.cloudImageUrl.isNullOrBlank()) return card
+
+        val uploadResult = uploader.uploadCardImage(
+            uid = uid,
+            cardId = card.id,
+            localImagePath = localPath
+        )
+
+        return uploadResult.fold(
+            onSuccess = { downloadUrl ->
+                val cardDao = database.cardDao()
+                database.withTransaction {
+                    val current = cardDao.getCardByIdIncludingDeleted(card.id)
+                    if (current != null && current.localImagePath == card.localImagePath) {
+                        cardDao.upsertCard(current.copy(cloudImageUrl = downloadUrl))
+                    }
+                }
+                card.copy(cloudImageUrl = downloadUrl)
+            },
+            onFailure = { error ->
+                // Nếu tệp ảnh cục bộ không còn tồn tại/bị thu hồi quyền -> bỏ qua ảnh để không chặn đồng bộ nội dung thẻ
+                if (error is ImageUploader.LocalImageUnavailableException) {
+                    card
+                } else {
+                    // Lỗi mạng / 429 / Storage tạm thời -> dừng để giữ PENDING_SYNC và tự thử lại ở phiên đồng bộ sau
+                    throw error
+                }
+            }
+        )
     }
 
     /**
@@ -653,6 +722,8 @@ class FirestoreCloudSyncManager(
          */
         internal fun mapSyncException(throwable: Throwable): Exception {
             return when (throwable) {
+                is ImageUploader.ImageUploadException -> throwable
+
                 is FirebaseFirestoreException -> when (throwable.code) {
                     FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED ->
                         Exception(ERROR_RATE_LIMIT_VI, throwable)
