@@ -22,6 +22,7 @@ data class AuthUiState(
     val password: String = "",
     val confirmPassword: String = "",
     val isLoading: Boolean = false,
+    val isGuestLoading: Boolean = false,
     val errorMessage: String? = null,
     val resetEmailSent: Boolean = false,
     val isAuthSuccess: Boolean = false,

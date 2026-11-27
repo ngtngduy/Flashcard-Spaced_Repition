@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Style
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -86,7 +87,7 @@ fun LoginScreen(
 ) {
     val focusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
-    val isBusy = uiState.isLoading || uiState.isMergingGuestData
+    val isBusy = uiState.isLoading || uiState.isGuestLoading || uiState.isMergingGuestData
 
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -379,9 +380,12 @@ fun LoginScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // Nút dùng thử ở chế độ Khách không cần tài khoản (Figma 2196:14..15 · Mục 6.2)
+            // Nút phụ "Dùng thử không cần đăng nhập" cho phép học offline ngay ở chế độ Khách (Figma 2196:14..15 · Mục 6.2)
             OutlinedButton(
-                onClick = onContinueAsGuestClick,
+                onClick = {
+                    focusManager.clearFocus()
+                    onContinueAsGuestClick()
+                },
                 enabled = !isBusy,
                 shape = RoundedCornerShape(15.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
@@ -389,16 +393,39 @@ fun LoginScreen(
                     containerColor = Color.Transparent,
                     contentColor = MaterialTheme.colorScheme.onBackground
                 ),
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 64.dp)
+                    .heightIn(min = 60.dp)
             ) {
-                Text(
-                    text = "Dùng thử không cần tài khoản (Chế độ Khách)",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium),
-                    textAlign = TextAlign.Center
-                )
+                if (uiState.isGuestLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Đang vào chế độ Khách...",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium)
+                    )
+                } else {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Dùng thử không cần đăng nhập",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium),
+                            textAlign = TextAlign.Center
+                        )
+                        Text(
+                            text = "Học ngoại tuyến ngay (Chế độ Khách)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))

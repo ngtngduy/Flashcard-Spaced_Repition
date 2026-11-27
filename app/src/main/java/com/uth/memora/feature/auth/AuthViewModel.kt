@@ -141,7 +141,7 @@ class AuthViewModel(
      */
     fun submitLogin() {
         val state = _uiState.value
-        if (state.isLoading || state.isMergingGuestData) return
+        if (state.isLoading || state.isGuestLoading || state.isMergingGuestData) return
 
         val cleanEmail = state.email.trim()
         val emailErr = validateEmail(cleanEmail)
@@ -170,7 +170,7 @@ class AuthViewModel(
      */
     fun submitRegister() {
         val state = _uiState.value
-        if (state.isLoading || state.isMergingGuestData) return
+        if (state.isLoading || state.isGuestLoading || state.isMergingGuestData) return
 
         val cleanDisplayName = state.displayName.trim()
         val cleanEmail = state.email.trim()
@@ -215,7 +215,7 @@ class AuthViewModel(
      */
     fun submitForgotPassword() {
         val state = _uiState.value
-        if (state.isLoading || state.isMergingGuestData) return
+        if (state.isLoading || state.isGuestLoading || state.isMergingGuestData) return
 
         val cleanEmail = state.email.trim()
         val emailErr = validateEmail(cleanEmail)
@@ -280,7 +280,7 @@ class AuthViewModel(
      */
     fun signInWithGoogle(idToken: String) {
         val state = _uiState.value
-        if (state.isLoading || state.isMergingGuestData) return
+        if (state.isLoading || state.isGuestLoading || state.isMergingGuestData) return
 
         val cleanToken = idToken.trim()
         if (cleanToken.isEmpty()) {
@@ -315,16 +315,16 @@ class AuthViewModel(
     }
 
     /**
-     * Tiếp tục sử dụng ứng dụng ở chế độ Khách ẩn danh (Mục 6.2).
+     * Tiếp tục sử dụng ứng dụng ở chế độ Khách ẩn danh để học offline ngay chưa cần tạo tài khoản (Mục 6.2).
      */
     fun continueAsGuest() {
         val state = _uiState.value
-        if (state.isLoading || state.isMergingGuestData) return
+        if (state.isLoading || state.isGuestLoading || state.isMergingGuestData) return
 
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
-                    isLoading = true,
+                    isGuestLoading = true,
                     errorMessage = null,
                     resetEmailSent = false
                 )
@@ -342,7 +342,7 @@ class AuthViewModel(
                 onSuccess = {
                     _uiState.update {
                         it.copy(
-                            isLoading = false,
+                            isGuestLoading = false,
                             errorMessage = null,
                             pendingMergeAccountId = null,
                             isAuthSuccess = true
@@ -352,7 +352,7 @@ class AuthViewModel(
                 onFailure = { error ->
                     _uiState.update {
                         it.copy(
-                            isLoading = false,
+                            isGuestLoading = false,
                             errorMessage = mapErrorToVietnamese(
                                 throwable = error,
                                 fallback = ERROR_GUEST_SIGN_IN_FAILED_VI

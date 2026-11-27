@@ -2,32 +2,18 @@ package com.uth.memora.feature.auth
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.systemBarsPadding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.uth.memora.feature.common.AppHeader
 import com.uth.memora.feature.common.ConfirmDialog
-import com.uth.memora.feature.common.MemoraSecondaryButton
 import com.uth.memora.feature.theme.MemoraTheme
 import com.uth.memora.integration.auth.GoogleSignInHelper
 import kotlinx.coroutines.launch
@@ -61,18 +47,23 @@ fun AuthRoute(
     }
 
     // Nhấn nút Back hệ thống ở Register / ForgotPassword sẽ quay về màn Đăng nhập thay vì thoát luồng Auth
-    BackHandler(enabled = uiState.currentMode != AuthMode.LOGIN && !uiState.isLoading) {
+    BackHandler(enabled = uiState.currentMode != AuthMode.LOGIN && !uiState.isLoading && !uiState.isGuestLoading) {
         viewModel.switchMode(AuthMode.LOGIN)
     }
 
     AuthRouteContent(
         uiState = uiState,
+        onDisplayNameChange = viewModel::onDisplayNameChange,
         onEmailChange = viewModel::onEmailChange,
         onPasswordChange = viewModel::onPasswordChange,
+        onConfirmPasswordChange = viewModel::onConfirmPasswordChange,
         onTogglePasswordVisibility = viewModel::togglePasswordVisibility,
+        onToggleConfirmPasswordVisibility = viewModel::toggleConfirmPasswordVisibility,
         onLoginClick = viewModel::submitLogin,
+        onRegisterClick = viewModel::submitRegister,
+        onSendResetLinkClick = viewModel::submitForgotPassword,
         onGoogleSignInClick = {
-            if (!uiState.isLoading && !uiState.isMergingGuestData) {
+            if (!uiState.isLoading && !uiState.isGuestLoading && !uiState.isMergingGuestData) {
                 coroutineScope.launch {
                     googleSignInHelper.getGoogleIdToken(context)
                         .onSuccess { idToken -> viewModel.signInWithGoogle(idToken) }
@@ -91,10 +82,15 @@ fun AuthRoute(
 @Composable
 private fun AuthRouteContent(
     uiState: AuthUiState,
+    onDisplayNameChange: (String) -> Unit,
     onEmailChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
+    onConfirmPasswordChange: (String) -> Unit,
     onTogglePasswordVisibility: () -> Unit,
+    onToggleConfirmPasswordVisibility: () -> Unit,
     onLoginClick: () -> Unit,
+    onRegisterClick: () -> Unit,
+    onSendResetLinkClick: () -> Unit,
     onGoogleSignInClick: () -> Unit,
     onSwitchMode: (AuthMode) -> Unit,
     onContinueAsGuestClick: () -> Unit,
@@ -124,26 +120,31 @@ private fun AuthRouteContent(
             }
 
             AuthMode.REGISTER -> {
-                // Màn Đăng ký (Figma 17:449) sẽ được ghép hoàn chỉnh ở bước tiếp theo (Mục 6.2)
-                AuthSubScreenPendingSlot(
-                    title = "Tạo tài khoản",
-                    description = "Màn hình Đăng ký (Figma 17:449) đang chờ ghép nối.",
-                    onBackToLogin = { onSwitchMode(AuthMode.LOGIN) }
+                RegisterScreen(
+                    uiState = uiState,
+                    onDisplayNameChange = onDisplayNameChange,
+                    onEmailChange = onEmailChange,
+                    onPasswordChange = onPasswordChange,
+                    onConfirmPasswordChange = onConfirmPasswordChange,
+                    onTogglePasswordVisibility = onTogglePasswordVisibility,
+                    onToggleConfirmPasswordVisibility = onToggleConfirmPasswordVisibility,
+                    onRegisterClick = onRegisterClick,
+                    onNavigateToLogin = { onSwitchMode(AuthMode.LOGIN) }
                 )
             }
 
             AuthMode.FORGOT_PASSWORD -> {
-                // Màn Quên mật khẩu (Figma 2193:2) sẽ được ghép hoàn chỉnh ở bước tiếp theo (Mục 6.2)
-                AuthSubScreenPendingSlot(
-                    title = "Quên mật khẩu",
-                    description = "Màn hình Quên mật khẩu (Figma 2193:2) đang chờ ghép nối.",
-                    onBackToLogin = { onSwitchMode(AuthMode.LOGIN) }
+                ForgotPasswordScreen(
+                    uiState = uiState,
+                    onEmailChange = onEmailChange,
+                    onSendResetLinkClick = onSendResetLinkClick,
+                    onNavigateToLogin = { onSwitchMode(AuthMode.LOGIN) }
                 )
             }
         }
     }
 
-    // Hộp thoại tạm xử lý gộp dữ liệu Khách khi đang có dữ liệu cục bộ (Mục 6.2 & 10.1)
+    // Hộp thoại xử lý gộp dữ liệu Khách khi đang có dữ liệu cục bộ (Mục 6.2 & 10.1)
     if (uiState.showMergeGuestDialog) {
         ConfirmDialog(
             title = "Gộp dữ liệu khách?",
@@ -157,59 +158,21 @@ private fun AuthRouteContent(
     }
 }
 
-@Composable
-private fun AuthSubScreenPendingSlot(
-    title: String,
-    description: String,
-    onBackToLogin: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        modifier = modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .systemBarsPadding()
-        ) {
-            AppHeader(
-                title = title,
-                onBack = onBackToLogin
-            )
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 24.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(20.dp))
-                MemoraSecondaryButton(
-                    text = "Quay lại Đăng nhập",
-                    onClick = onBackToLogin
-                )
-            }
-        }
-    }
-}
-
 @Preview(name = "AuthRoute - Dark", showBackground = true, heightDp = 900)
 @Composable
 private fun AuthRouteDarkPreview() {
     MemoraTheme(darkTheme = true) {
         AuthRouteContent(
             uiState = AuthUiState(currentMode = AuthMode.LOGIN),
+            onDisplayNameChange = {},
             onEmailChange = {},
             onPasswordChange = {},
+            onConfirmPasswordChange = {},
             onTogglePasswordVisibility = {},
+            onToggleConfirmPasswordVisibility = {},
             onLoginClick = {},
+            onRegisterClick = {},
+            onSendResetLinkClick = {},
             onGoogleSignInClick = {},
             onSwitchMode = {},
             onContinueAsGuestClick = {},
