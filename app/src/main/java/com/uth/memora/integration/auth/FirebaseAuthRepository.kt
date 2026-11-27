@@ -19,6 +19,7 @@ import com.uth.memora.core.database.dao.DeckDao
 import com.uth.memora.core.datastore.UserPreferencesDataStore
 import com.uth.memora.core.domain.AuthRepository
 import com.uth.memora.core.domain.UserPreferencesRepository
+import com.uth.memora.core.model.Deck
 import com.uth.memora.core.model.UserAccount
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -26,7 +27,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -48,24 +51,45 @@ class FirebaseAuthRepository(
 ) : AuthRepository {
 
     /**
-     * Quan sát trạng thái đăng nhập theo thời gian thực qua [FirebaseAuth.AuthStateListener] (Mục 6.2).
+     * Tài khoản Khách cục bộ dự phòng khi Firebase Anonymous Auth thất bại (offline, chưa bật Anonymous Auth...)
+     * nhằm bảo đảm chế độ dùng thử Offline-First luôn vào được 100% (Bug M3-2).
      */
-    override fun observeCurrentUser(): Flow<UserAccount?> = callbackFlow {
-        val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
-            trySend(firebaseAuth.currentUser?.toUserAccount())
-        }
-        trySend(auth.currentUser?.toUserAccount())
-        auth.addAuthStateListener(listener)
-        awaitClose {
-            auth.removeAuthStateListener(listener)
-        }
-    }.distinctUntilChanged()
+    private val localFallbackGuestUser = MutableStateFlow<UserAccount?>(null)
 
     /**
-     * Trả về thông tin tài khoản hiện đang đăng nhập, hoặc `null` nếu chưa xác thực (Mục 6.2).
+     * Quan sát trạng thái đăng nhập theo thời gian thực qua [FirebaseAuth.AuthStateListener],
+     * tự động phản ánh [localFallbackGuestUser] khi `auth.currentUser == null` (Mục 6.2 & Bug M3-2).
+     */
+    override fun observeCurrentUser(): Flow<UserAccount?> {
+        val firebaseUserFlow = callbackFlow {
+            val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+                val remoteUser = firebaseAuth.currentUser?.toUserAccount()
+                if (remoteUser != null && !remoteUser.isAnonymous) {
+                    localFallbackGuestUser.value = null
+                }
+                trySend(remoteUser)
+            }
+            val initialRemoteUser = auth.currentUser?.toUserAccount()
+            if (initialRemoteUser != null && !initialRemoteUser.isAnonymous) {
+                localFallbackGuestUser.value = null
+            }
+            trySend(initialRemoteUser)
+            auth.addAuthStateListener(listener)
+            awaitClose {
+                auth.removeAuthStateListener(listener)
+            }
+        }
+        return combine(firebaseUserFlow, localFallbackGuestUser) { firebaseUser, fallbackGuest ->
+            firebaseUser ?: fallbackGuest
+        }.distinctUntilChanged()
+    }
+
+    /**
+     * Trả về thông tin tài khoản hiện đang đăng nhập (ưu tiên Firebase Auth, dự phòng [localFallbackGuestUser]),
+     * hoặc `null` nếu chưa xác thực (Mục 6.2 & Bug M3-2).
      */
     override suspend fun getCurrentUser(): UserAccount? =
-        auth.currentUser?.toUserAccount()
+        auth.currentUser?.toUserAccount() ?: localFallbackGuestUser.value
 
     /**
      * Đăng nhập bằng email và mật khẩu (Mục 6.2).
@@ -85,6 +109,7 @@ class FirebaseAuthRepository(
             val authResult = auth.signInWithEmailAndPassword(cleanEmail, password).await()
             val firebaseUser = authResult.user
                 ?: return Result.failure(IllegalStateException(ERROR_SIGN_IN_UNKNOWN_VI))
+            localFallbackGuestUser.value = null
             Result.success(firebaseUser.toUserAccount())
         } catch (e: CancellationException) {
             // Không nuốt tín hiệu hủy coroutine có chủ đích từ ViewModel
@@ -126,6 +151,7 @@ class FirebaseAuthRepository(
                 .build()
             firebaseUser.updateProfile(profileUpdates).await()
 
+            localFallbackGuestUser.value = null
             val currentUser = auth.currentUser ?: firebaseUser
             Result.success(currentUser.toUserAccount(fallbackDisplayName = resolvedDisplayName))
         } catch (e: CancellationException) {
@@ -149,6 +175,7 @@ class FirebaseAuthRepository(
             val authResult = auth.signInWithCredential(credential).await()
             val firebaseUser = authResult.user
                 ?: return Result.failure(IllegalStateException(ERROR_GOOGLE_SIGN_IN_UNKNOWN_VI))
+            localFallbackGuestUser.value = null
             Result.success(firebaseUser.toUserAccount())
         } catch (e: CancellationException) {
             throw e
@@ -181,18 +208,34 @@ class FirebaseAuthRepository(
 
     /**
      * Đăng nhập ẩn danh ở chế độ dùng thử (Khách) trên Firebase Auth (Mục 6.2).
+     * Nếu Firebase Auth ẩn danh thất bại vì bất kỳ lỗi nào (ngoại trừ [CancellationException]),
+     * tự động tạo tài khoản Khách cục bộ (`Deck.GUEST_OWNER_ID`) để chế độ dùng thử Offline-First luôn hoạt động (Bug M3-2).
      */
     override suspend fun signInAnonymously(): Result<UserAccount> {
         return try {
             val authResult = auth.signInAnonymously().await()
             val firebaseUser = authResult.user
-                ?: return Result.failure(IllegalStateException(ERROR_ANONYMOUS_SIGN_IN_UNKNOWN_VI))
+                ?: return Result.success(activateLocalFallbackGuest())
+            localFallbackGuestUser.value = null
             Result.success(firebaseUser.toUserAccount().copy(isAnonymous = true))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Result.failure(mapAnonymousSignInException(e))
+            logDebugAuthFailure(operation = "signInAnonymously", throwable = e)
+            Result.success(activateLocalFallbackGuest())
         }
+    }
+
+    private fun activateLocalFallbackGuest(): UserAccount {
+        val localGuest = UserAccount(
+            uid = Deck.GUEST_OWNER_ID,
+            displayName = "Khách",
+            email = null,
+            photoUrl = null,
+            isAnonymous = true
+        )
+        localFallbackGuestUser.value = localGuest
+        return localGuest
     }
 
     /**
@@ -202,8 +245,10 @@ class FirebaseAuthRepository(
      */
     override suspend fun signOut(): Result<Unit> {
         val signedOutOwnerId = auth.currentUser?.uid?.takeIf { it.isNotBlank() }
+            ?: localFallbackGuestUser.value?.uid?.takeIf { it.isNotBlank() }
 
         return try {
+            localFallbackGuestUser.value = null
             auth.signOut()
 
             // Dùng NonCancellable để bảo đảm xóa sạch dữ liệu nhạy cảm ngay cả khi UI điều hướng và hủy scope

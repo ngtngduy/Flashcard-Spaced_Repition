@@ -19,10 +19,14 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.uth.memora.MemoraApplication
+import com.uth.memora.core.model.UserPreferences
 import com.uth.memora.integration.speech.SpeechToTextController
 import com.uth.memora.integration.speech.SpeechUiState
 import com.uth.memora.integration.worker.GradingScheduler
 import com.uth.memora.memoraViewModelFactory
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import java.util.Locale
 
 /**
@@ -51,6 +55,13 @@ fun PracticeRoute(
     )
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val userPreferencesRepository = remember(appContext) {
+        (appContext as? MemoraApplication)?.container?.userPreferencesRepository
+    }
+    val userPreferencesFlow: Flow<UserPreferences?> = remember(userPreferencesRepository) {
+        userPreferencesRepository?.observeUserPreferences() ?: flowOf(null)
+    }
+    val userPreferences by userPreferencesFlow.collectAsStateWithLifecycle(initialValue = null)
     val isOnline by rememberIsNetworkAvailable(appContext)
     val speakWord = rememberPracticeWordSpeaker(appContext)
 
@@ -110,7 +121,11 @@ fun PracticeRoute(
             speechController.reset()
             viewModel.refreshTargetCards()
         },
-        onSpeakWord = speakWord,
+        onSpeakWord = { word ->
+            if (userPreferences?.isSoundEnabled != false) {
+                speakWord(word)
+            }
+        },
         onInputTextChange = { newText ->
             if (speechState != SpeechUiState.Idle) {
                 speechController.reset()
