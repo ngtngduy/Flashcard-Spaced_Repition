@@ -128,21 +128,21 @@ sealed class AiAutoFillException(
 
     companion object {
         const val ERROR_BLANK_WORD_VI: String =
-            "Vui lòng nhập một từ tiếng Anh trước khi dùng gợi ý AI."
+            "Vui lòng nhập một từ tiếng Anh trước khi dùng AI gợi ý nhé."
         const val ERROR_MISSING_API_KEY_VI: String =
-            "Chưa cấu hình khóa API Gemini. Vui lòng kiểm tra cấu hình ứng dụng."
+            "Tính năng AI gợi ý hiện chưa sẵn sàng. Bạn có thể tự nhập thông tin thẻ nhé."
         const val ERROR_INVALID_API_KEY_VI: String =
-            "Khóa API Gemini không hợp lệ hoặc không có quyền truy cập."
+            "Không thể kết nối tới trợ lý AI lúc này. Bạn thử lại sau hoặc tự nhập thông tin thẻ nhé."
         const val ERROR_NETWORK_VI: String =
-            "Không có kết nối mạng hoặc đường truyền không ổn định. Vui lòng kiểm tra mạng và thử lại."
+            "Không có kết nối mạng. Hãy kiểm tra Wi-Fi/4G rồi thử gợi ý lại hoặc tự nhập thẻ nhé."
         const val ERROR_RATE_LIMIT_VI: String =
-            "Hệ thống AI đã chạm giới hạn lượt gọi (429). Vui lòng đợi một lát rồi thử lại."
+            "Trợ lý AI đang bận do có nhiều lượt yêu cầu. Bạn đợi một lát rồi thử gợi ý lại hoặc tự nhập thẻ nhé."
         const val ERROR_TIMEOUT_VI: String =
-            "AI phản hồi quá thời gian cho phép (10 giây). Vui lòng thử gợi ý lại sau."
+            "AI phản hồi hơi lâu. Bạn kiểm tra mạng rồi thử gợi ý lại hoặc tự nhập thẻ nhé."
         const val ERROR_INVALID_JSON_VI: String =
-            "Phản hồi từ AI không đúng định dạng JSON chuẩn. Vui lòng thử gợi ý lại."
+            "Kết quả gợi ý từ AI chưa đọc được. Bạn thử bấm gợi ý lại hoặc tự nhập thông tin thẻ nhé."
         const val ERROR_UNKNOWN_VI: String =
-            "Không thể gợi ý thông tin thẻ bằng AI lúc này. Vui lòng thử lại sau."
+            "Chưa thể gợi ý thông tin thẻ lúc này. Bạn thử lại sau hoặc tự nhập giúp mình nhé."
     }
 }
 
@@ -302,25 +302,44 @@ class GeminiCardAutoFillService internal constructor(
                     combinedMessage.contains("permission_denied") ->
                     AiAutoFillException.InvalidApiKey()
 
-                // 6. Lỗi mất mạng / gián đoạn đường truyền (IOException hoặc lỗi kết nối tương đương)
+                // 6. Lỗi mất mạng / gián đoạn đường truyền (IOException, SSL, HTTP 5xx hoặc lỗi kết nối tương đương)
                 causeChain.any { it is IOException } ||
+                    className.contains("UnknownHost", ignoreCase = true) ||
+                    className.contains("ConnectException", ignoreCase = true) ||
+                    className.contains("SSL", ignoreCase = true) ||
+                    combinedMessage.contains("unknownhost") ||
                     combinedMessage.contains("unable to resolve host") ||
                     combinedMessage.contains("no address associated") ||
                     combinedMessage.contains("failed to connect") ||
                     combinedMessage.contains("connection refused") ||
+                    combinedMessage.contains("connection reset") ||
+                    combinedMessage.contains("broken pipe") ||
+                    combinedMessage.contains("service unavailable") ||
+                    combinedMessage.contains("bad gateway") ||
+                    combinedMessage.contains("http 500") ||
+                    combinedMessage.contains("http 502") ||
+                    combinedMessage.contains("http 503") ||
+                    combinedMessage.contains("http 504") ||
                     combinedMessage.contains("network") ||
                     combinedMessage.contains("socket") ->
                     AiAutoFillException.NetworkUnavailable()
 
                 // 7. Lỗi timeout được báo qua thông điệp từ SDK
-                combinedMessage.contains("timed out") || combinedMessage.contains("timeout") ->
+                className.contains("Timeout", ignoreCase = true) ||
+                    combinedMessage.contains("timed out") ||
+                    combinedMessage.contains("timeout") ||
+                    combinedMessage.contains("deadline_exceeded") ->
                     AiAutoFillException.Timeout()
 
                 // 8. Lỗi phản hồi bị chặn hoặc sai cấu trúc dữ liệu từ phía Gemini SDK
-                className.contains("Serialization", ignoreCase = true) ||
+                className.contains("Json", ignoreCase = true) ||
+                    className.contains("Serialization", ignoreCase = true) ||
                     className.contains("ResponseStopped", ignoreCase = true) ||
                     className.contains("PromptBlocked", ignoreCase = true) ||
-                    combinedMessage.contains("json") ->
+                    combinedMessage.contains("json") ||
+                    combinedMessage.contains("malformed") ||
+                    combinedMessage.contains("unexpected token") ||
+                    combinedMessage.contains("unexpected end") ->
                     AiAutoFillException.InvalidJsonFormat()
 
                 else -> AiAutoFillException.Unknown()

@@ -362,9 +362,11 @@ private fun PracticeSignedInContent(
             totalTargetCards = uiState.targetCards.size
         )
 
-        // Banner thông báo lỗi hoặc phản hồi tiếng Việt thân thiện (Mục 9.5)
-        val bannerError = uiState.errorMessage?.takeUnless { isQuotaExhausted }
-        val bannerFeedback = uiState.feedbackMessage
+        // Banner thông báo lỗi hoặc phản hồi tiếng Việt thân thiện (lọc sạch mọi chuỗi kỹ thuật thô - Mục 9.5)
+        val bannerError = uiState.errorMessage
+            ?.takeUnless { isQuotaExhausted || it.isBlank() }
+            ?.let { PracticeViewModel.sanitizeUserFacingErrorMessage(it) }
+        val bannerFeedback = uiState.feedbackMessage?.takeIf { it.isNotBlank() }
         if (!bannerError.isNullOrBlank()) {
             PracticeMessageBanner(
                 message = bannerError,

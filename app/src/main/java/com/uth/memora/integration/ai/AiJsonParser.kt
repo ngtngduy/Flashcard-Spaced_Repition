@@ -44,9 +44,9 @@ object AiJsonParser {
     private const val FALLBACK_KEY_EXAMPLE_CAMEL: String = "exampleSentence"
 
     private const val ERROR_INVALID_FORMAT_VI: String =
-        "Phản hồi AI không đúng định dạng JSON chuẩn. Vui lòng thử chấm lại."
+        "Kết quả chấm từ AI chưa đọc được. Bạn bấm Chấm lại giúp mình nhé."
     private const val ERROR_AUTO_FILL_INVALID_FORMAT_VI: String =
-        "Phản hồi AI không đúng định dạng JSON chuẩn. Vui lòng thử gợi ý lại."
+        "Kết quả gợi ý từ AI chưa đọc được. Bạn thử bấm gợi ý lại hoặc tự nhập thông tin thẻ nhé."
 
     private val MARKDOWN_FENCE_REGEX = Regex(
         pattern = "```(?:json)?\\s*([\\s\\S]*?)\\s*```",
@@ -68,7 +68,7 @@ object AiJsonParser {
     fun parseEvaluationResult(rawResponse: String?): Result<AiEvaluationResult> {
         if (rawResponse.isNullOrBlank()) {
             return Result.failure(
-                AiJsonParseException("AI trả về nội dung trống. Vui lòng thử chấm lại.")
+                AiJsonParseException("AI chưa trả về kết quả chấm. Bạn bấm Chấm lại nhé.")
             )
         }
 
@@ -85,25 +85,25 @@ object AiJsonParser {
 
         val score = jsonObject.optScore(GradingPrompt.KEY_SCORE)
             ?: return Result.failure(
-                AiJsonParseException("Phản hồi AI thiếu hoặc sai định dạng điểm số.")
+                AiJsonParseException("Kết quả chấm từ AI chưa có điểm số. Bạn bấm Chấm lại nhé.")
             )
 
         val rawCefrLevel = jsonObject.optNonBlankString(
             GradingPrompt.KEY_CEFR_LEVEL,
             FALLBACK_KEY_CEFR_LEVEL
         ) ?: return Result.failure(
-            AiJsonParseException("Phản hồi AI thiếu trình độ CEFR.")
+            AiJsonParseException("Kết quả chấm từ AI chưa đầy đủ trình độ câu. Bạn bấm Chấm lại nhé.")
         )
         val cefrLevel = normalizeCefrLevel(rawCefrLevel)
             ?: return Result.failure(
-                AiJsonParseException("Phản hồi AI trả về trình độ CEFR không hợp lệ.")
+                AiJsonParseException("Kết quả chấm từ AI chưa đầy đủ trình độ câu. Bạn bấm Chấm lại nhé.")
             )
 
         val feedbackVi = jsonObject.optNonBlankString(
             GradingPrompt.KEY_FEEDBACK_VI,
             FALLBACK_KEY_FEEDBACK_VI
         ) ?: return Result.failure(
-            AiJsonParseException("Phản hồi AI thiếu nhận xét tiếng Việt.")
+            AiJsonParseException("Kết quả chấm từ AI chưa có nhận xét. Bạn bấm Chấm lại nhé.")
         )
 
         val grammarAnalysis = jsonObject.optStringList(
@@ -115,14 +115,14 @@ object AiJsonParser {
             GradingPrompt.KEY_CORRECTED_SENTENCE,
             FALLBACK_KEY_CORRECTED_SENTENCE
         ) ?: return Result.failure(
-            AiJsonParseException("Phản hồi AI thiếu câu đã sửa ngữ pháp.")
+            AiJsonParseException("Kết quả chấm từ AI chưa có câu đã sửa. Bạn bấm Chấm lại nhé.")
         )
 
         val naturalAlternative = jsonObject.optNonBlankString(
             GradingPrompt.KEY_NATURAL_ALTERNATIVE,
             FALLBACK_KEY_NATURAL_ALTERNATIVE
         ) ?: return Result.failure(
-            AiJsonParseException("Phản hồi AI thiếu câu diễn đạt tự nhiên.")
+            AiJsonParseException("Kết quả chấm từ AI chưa có gợi ý diễn đạt tự nhiên. Bạn bấm Chấm lại nhé.")
         )
 
         return Result.success(
@@ -150,7 +150,7 @@ object AiJsonParser {
     ): Result<AutoFillCardData> {
         if (rawJson.isNullOrBlank()) {
             return Result.failure(
-                AiJsonParseException("AI trả về nội dung trống. Vui lòng thử gợi ý lại.")
+                AiJsonParseException("AI chưa trả về gợi ý cho từ này. Bạn thử bấm gợi ý lại hoặc tự nhập nhé.")
             )
         }
 
@@ -168,7 +168,7 @@ object AiJsonParser {
         val word = jsonObject.optNonBlankString(AutoFillPrompt.KEY_WORD)
             ?: fallbackWord.trim().takeIf { it.isNotEmpty() }
             ?: return Result.failure(
-                AiJsonParseException("Phản hồi AI thiếu từ vựng tiếng Anh.")
+                AiJsonParseException("Gợi ý từ AI chưa đầy đủ từ vựng. Bạn thử bấm gợi ý lại hoặc tự nhập nhé.")
             )
 
         val meaning = jsonObject.optNonBlankString(
@@ -176,7 +176,7 @@ object AiJsonParser {
             FALLBACK_KEY_MEANING_VI_SNAKE,
             FALLBACK_KEY_MEANING_VI_CAMEL
         ) ?: return Result.failure(
-            AiJsonParseException("Phản hồi AI thiếu nghĩa tiếng Việt của từ.")
+            AiJsonParseException("Gợi ý từ AI chưa có nghĩa tiếng Việt. Bạn thử bấm gợi ý lại hoặc tự nhập nhé.")
         )
 
         val phonetic = jsonObject.optNonBlankString(
