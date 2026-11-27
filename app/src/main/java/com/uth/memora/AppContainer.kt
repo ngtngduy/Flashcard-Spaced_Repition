@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.CreationExtras
+import com.google.firebase.FirebaseApp
 import com.uth.memora.core.data.PrebuiltDeckSeeder
 import com.uth.memora.core.data.RoomCardRepository
 import com.uth.memora.core.data.RoomDeckRepository
@@ -17,7 +18,6 @@ import com.uth.memora.core.domain.AiGradingService
 import com.uth.memora.core.domain.AuthRepository
 import com.uth.memora.core.domain.CardRepository
 import com.uth.memora.core.domain.CloudSyncManager
-import com.uth.memora.core.domain.CloudSyncSummary
 import com.uth.memora.core.domain.DeckRepository
 import com.uth.memora.core.domain.PracticeSentenceRepository
 import com.uth.memora.core.domain.StatisticsRepository
@@ -28,23 +28,21 @@ import com.uth.memora.core.fake.FakeAiCardAutoFillService
 import com.uth.memora.core.fake.FakeAiGradingService
 import com.uth.memora.core.fake.FakeAuthRepository
 import com.uth.memora.core.fake.FakeCloudSyncManager
-import com.uth.memora.core.model.Deck
 import com.uth.memora.integration.ai.GeminiAiGradingService
 import com.uth.memora.integration.ai.GeminiCardAutoFillService
+import com.uth.memora.integration.auth.FirebaseAuthRepository
+import com.uth.memora.integration.reminder.ReminderScheduler
+import com.uth.memora.integration.sync.FirestoreCloudSyncManager
+import com.uth.memora.integration.sync.SyncStatusProviderImpl
 import com.uth.memora.integration.worker.GradingScheduler
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.map
+import com.uth.memora.integration.worker.SyncScheduler
 
 /**
  * Thùng chứa phụ thuộc (Manual Dependency Injection Container).
  *
  * Cung cấp toàn bộ Repository và Service thật (Room Database, DataStore Preferences,
- * Gemini AI Grading & Auto-Fill, WorkManager Schedulers) cho các ViewModel thông qua [memoraViewModelFactory].
+ * Gemini AI Grading & Auto-Fill, Firebase Auth, Firestore Cloud Sync, WorkManager Schedulers)
+ * cho các ViewModel thông qua [memoraViewModelFactory].
  */
 interface AppContainer {
     val deckRepository: DeckRepository
@@ -64,6 +62,13 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     private val appContext: Context = context.applicationContext
 
+    private val isFirebaseAvailable: Boolean by lazy {
+        runCatching {
+            FirebaseApp.getApps(appContext).isNotEmpty() ||
+                FirebaseApp.initializeApp(appContext) != null
+        }.getOrDefault(false)
+    }
+
     val database: MemoraDatabase by lazy {
         MemoraDatabase.getInstance(appContext)
     }
@@ -82,7 +87,16 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
     }
 
     override val authRepository: AuthRepository by lazy {
-        FakeAuthRepository()
+        if (isFirebaseAvailable) {
+            runCatching {
+                FirebaseAuthRepository(
+                    database = database,
+                    userPreferencesRepository = userPreferencesRepository
+                )
+            }.getOrElse { FakeAuthRepository() }
+        } else {
+            FakeAuthRepository()
+        }
     }
 
     override val aiGradingService: AiGradingService by lazy {
@@ -151,11 +165,23 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
     }
 
     override val cloudSyncManager: CloudSyncManager by lazy {
-        FakeCloudSyncManager()
+        if (isFirebaseAvailable) {
+            runCatching {
+                FirestoreCloudSyncManager(
+                    context = appContext,
+                    authRepository = authRepository,
+                    database = database,
+                    userPreferencesRepository = userPreferencesRepository
+                )
+            }.getOrElse { FakeCloudSyncManager() }
+        } else {
+            FakeCloudSyncManager()
+        }
     }
 
     override val syncStatusProvider: SyncStatusProvider by lazy {
-        RoomBackedSyncStatusProvider(
+        SyncStatusProviderImpl(
+            context = appContext,
             database = database,
             authRepository = authRepository,
             userPreferencesRepository = userPreferencesRepository,
@@ -167,75 +193,19 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
      * Khởi chạy các tác vụ nền an toàn khi mở ứng dụng:
      * 1. Chèn idempotent 2 bộ từ mẫu ngoại tuyến (`Oxford 3000 cơ bản` & `IELTS cơ bản`) vào Room.
      * 2. Khôi phục hàng đợi chấm câu AI cho các câu đang ở trạng thái `PENDING_GRADE`.
+     * 3. Đặt lịch đồng bộ định kỳ và theo dõi cài đặt giờ nhắc học hằng ngày qua WorkManager.
      */
     suspend fun initializeStartupTasks() {
         runCatching { prebuiltDeckSeeder.seedIfNeeded() }
         runCatching {
             GradingScheduler(appContext).resumePendingSentences(practiceSentenceRepository)
         }
-    }
-}
-
-/**
- * Bộ cung cấp trạng thái đồng bộ thời gian thực dựa trên số bản ghi `PENDING_SYNC` thật trong Room Database
- * kết hợp với `lastSyncedAtMillis` từ DataStore (Mục 8.3, 10.1 & 13).
- */
-@OptIn(ExperimentalCoroutinesApi::class)
-private class RoomBackedSyncStatusProvider(
-    private val database: MemoraDatabase,
-    private val authRepository: AuthRepository,
-    private val userPreferencesRepository: UserPreferencesRepository,
-    private val cloudSyncManager: CloudSyncManager
-) : SyncStatusProvider {
-
-    private val isSyncingState = MutableStateFlow(false)
-    private val lastErrorState = MutableStateFlow<String?>(null)
-
-    override fun observeSyncSummary(): Flow<CloudSyncSummary> {
-        val ownerFlow = authRepository
-            .observeCurrentUser()
-            .map { user -> user?.uid?.takeIf { it.isNotBlank() } ?: Deck.GUEST_OWNER_ID }
-            .distinctUntilChanged()
-
-        val pendingCountFlow = ownerFlow.flatMapLatest { ownerId ->
-            combine(
-                database.deckDao().countPendingSync(ownerId),
-                database.cardDao().countPendingSync(ownerId),
-                database.reviewLogDao().countPendingSync(ownerId),
-                database.practiceSentenceDao().countPendingSync(ownerId)
-            ) { decks, cards, logs, sentences ->
-                (decks + cards + logs + sentences).coerceAtLeast(0)
-            }
+        runCatching {
+            SyncScheduler.schedulePeriodicSync(appContext)
+            SyncScheduler.enqueueImmediateSync(appContext)
         }
-
-        return combine(
-            pendingCountFlow,
-            userPreferencesRepository.observeUserPreferences(),
-            isSyncingState,
-            lastErrorState
-        ) { pendingCount, prefs, isSyncing, errorMsg ->
-            CloudSyncSummary(
-                isSyncing = isSyncing,
-                pendingChangesCount = pendingCount,
-                lastSyncedAtMillis = prefs.lastSyncedAtMillis,
-                syncErrorMessage = errorMsg
-            )
-        }
-    }
-
-    override suspend fun triggerImmediateSync(): Result<Int> {
-        isSyncingState.value = true
-        lastErrorState.value = null
-        return try {
-            val result = cloudSyncManager.syncPendingChanges()
-            result.onSuccess {
-                userPreferencesRepository.setLastSyncedAtMillis(System.currentTimeMillis())
-            }.onFailure { err ->
-                lastErrorState.value = err.message
-            }
-            result
-        } finally {
-            isSyncingState.value = false
+        runCatching {
+            ReminderScheduler(appContext).observeAndSync(userPreferencesRepository)
         }
     }
 }
