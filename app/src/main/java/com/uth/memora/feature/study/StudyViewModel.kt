@@ -421,14 +421,13 @@ class StudyViewModel(
     }
 
     /**
-     * Đánh dấu thẻ mới ngay khi lần đầu xuất hiện trên màn hình (Mục 6.5).
+     * Giữ nguyên thẻ ở trạng thái NEW khi mới hiển thị trên màn hình (chỉ khi người dùng thực sự bấm
+     * nút đánh giá "Học lại" / "Đã nhớ" qua [submitRating] thì mới gán firstSeenDay, trừ hạn mức từ mới
+     * và chuyển sang lộ trình Ôn tập). Tránh trường hợp bấm vào Học từ mới rồi bấm thoát ra bị tự trừ từ.
      */
-    private suspend fun markDisplayedIfNew(card: Card): Card {
-        val shouldMark = (studyMode == StudyMode.NEW_CARDS || card.state == CardState.NEW) &&
-            displayedNewCardIds.add(card.id)
-        if (!shouldMark) return card
-
-        return repository.markNewCardDisplayed(card.id).getOrDefault(card)
+    private fun markDisplayedIfNew(card: Card): Card {
+        displayedNewCardIds.add(card.id)
+        return card
     }
 
     companion object {

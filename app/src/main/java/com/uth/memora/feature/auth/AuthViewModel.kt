@@ -408,14 +408,16 @@ class AuthViewModel(
                         )
                     }
                 },
-                onFailure = { error ->
+                onFailure = { _ ->
+                    // Tài khoản đã xác thực thành công: vẫn đóng MergeGuestDialog và cho vào app, SyncWorker sẽ đồng bộ bù ở nền (Bug M3-1)
                     _uiState.update {
                         it.copy(
                             isMergingGuestData = false,
-                            errorMessage = mapErrorToVietnamese(
-                                throwable = error,
-                                fallback = ERROR_MERGE_GUEST_FAILED_VI
-                            )
+                            pendingMergeAccountId = null,
+                            hasLocalGuestData = false,
+                            isAuthSuccess = true,
+                            shouldTriggerCloudSync = true,
+                            errorMessage = null
                         )
                     }
                 }
@@ -536,18 +538,18 @@ class AuthViewModel(
                                     )
                                 }
                             },
-                            onFailure = { mergeError ->
-                                // Nếu gộp tự động gặp lỗi mạng -> bật MergeGuestDialog kèm thông báo để người dùng thử lại
+                            onFailure = { _ ->
+                                // Tài khoản đã xác thực thành công: không chặn vào ứng dụng nếu lỗi đồng bộ mạng/Firestore,
+                                // đóng hộp thoại và để SyncWorker chạy bù ở nền (Bug M3-1)
                                 _uiState.update {
                                     it.copy(
                                         isLoading = false,
-                                        pendingMergeAccountId = account.uid,
-                                        isAuthSuccess = false,
-                                        shouldTriggerCloudSync = false,
-                                        errorMessage = mapErrorToVietnamese(
-                                            throwable = mergeError,
-                                            fallback = ERROR_MERGE_GUEST_FAILED_VI
-                                        )
+                                        isMergingGuestData = false,
+                                        pendingMergeAccountId = null,
+                                        hasLocalGuestData = false,
+                                        isAuthSuccess = true,
+                                        shouldTriggerCloudSync = true,
+                                        errorMessage = null
                                     )
                                 }
                             }
@@ -571,7 +573,8 @@ class AuthViewModel(
 
     /**
      * Kiểm tra tài khoản [accountId] đã có dữ liệu trên Cloud Firestore hay chưa (Mục 6.2 & 10.1).
-     * Khi dùng `FakeCloudSyncManager` hoặc không truy vấn được mạng -> trả `true` để luôn hỏi người dùng an toàn.
+     * Nếu không kiểm tra được Firestore (lỗi mạng/quyền) -> trả `false` để coi như chưa có dữ liệu Cloud
+     * từ xa, tránh bật nhầm hộp thoại `MergeGuestDialog` làm kẹt người dùng.
      */
     private suspend fun checkHasRemoteCloudData(accountId: String): Boolean {
         val firestoreSync = cloudSyncManager as? FirestoreCloudSyncManager ?: return true
@@ -580,7 +583,7 @@ class AuthViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (_: Throwable) {
-            true
+            false
         }
     }
 

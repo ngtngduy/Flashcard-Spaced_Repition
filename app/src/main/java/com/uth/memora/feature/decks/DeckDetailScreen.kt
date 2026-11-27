@@ -343,8 +343,15 @@ fun DeckDetailScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
+                            val studyButtonLabel = when {
+                                uiState.dueCardsCount == 0 && uiState.newCardsCount > 0 ->
+                                    "Học thẻ mới (${uiState.newCardsCount})"
+                                uiState.dueCardsCount > 0 ->
+                                    "Ôn tập bộ thẻ (${uiState.dueCardsCount})"
+                                else -> "Ôn tập bộ thẻ"
+                            }
                             Text(
-                                text = "Ôn tập bộ thẻ",
+                                text = studyButtonLabel,
                                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis

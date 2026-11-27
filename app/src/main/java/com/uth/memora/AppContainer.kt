@@ -16,6 +16,7 @@ import com.uth.memora.core.datastore.UserPreferencesDataStore
 import com.uth.memora.core.domain.AiCardAutoFillService
 import com.uth.memora.core.domain.AiGradingService
 import com.uth.memora.core.domain.AuthRepository
+import com.uth.memora.core.domain.AutoFillCardData
 import com.uth.memora.core.domain.CardRepository
 import com.uth.memora.core.domain.CloudSyncManager
 import com.uth.memora.core.domain.DeckRepository
@@ -28,6 +29,8 @@ import com.uth.memora.core.fake.FakeAiCardAutoFillService
 import com.uth.memora.core.fake.FakeAiGradingService
 import com.uth.memora.core.fake.FakeAuthRepository
 import com.uth.memora.core.fake.FakeCloudSyncManager
+import com.uth.memora.core.model.AiEvaluationResult
+import com.uth.memora.integration.ai.AiAutoFillException
 import com.uth.memora.integration.ai.GeminiAiGradingService
 import com.uth.memora.integration.ai.GeminiCardAutoFillService
 import com.uth.memora.integration.auth.FirebaseAuthRepository
@@ -100,18 +103,49 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
     }
 
     override val aiGradingService: AiGradingService by lazy {
+        val fallback = FakeAiGradingService(simulatedDelayMillis = 400L)
         if (BuildConfig.GEMINI_API_KEY.isNotBlank()) {
-            GeminiAiGradingService(apiKey = BuildConfig.GEMINI_API_KEY)
+            val gemini = GeminiAiGradingService(apiKey = BuildConfig.GEMINI_API_KEY)
+            object : AiGradingService {
+                override suspend fun evaluateSentence(
+                    targetWord: String,
+                    meaningVi: String,
+                    userSentence: String
+                ): Result<AiEvaluationResult> {
+                    val primary = gemini.evaluateSentence(targetWord, meaningVi, userSentence)
+                    return if (primary.isSuccess) {
+                        primary
+                    } else {
+                        fallback.evaluateSentence(targetWord, meaningVi, userSentence)
+                    }
+                }
+            }
         } else {
-            FakeAiGradingService()
+            fallback
         }
     }
 
     override val aiCardAutoFillService: AiCardAutoFillService by lazy {
+        val fallback = FakeAiCardAutoFillService()
         if (BuildConfig.GEMINI_API_KEY.isNotBlank()) {
-            GeminiCardAutoFillService(apiKey = BuildConfig.GEMINI_API_KEY)
+            val gemini = GeminiCardAutoFillService(apiKey = BuildConfig.GEMINI_API_KEY)
+            object : AiCardAutoFillService {
+                override suspend fun autoFillCard(word: String): Result<AutoFillCardData> {
+                    val primary = gemini.autoFillCard(word)
+                    return if (primary.isSuccess) {
+                        primary
+                    } else {
+                        val err = primary.exceptionOrNull()
+                        if (err is AiAutoFillException.BlankWord) {
+                            primary
+                        } else {
+                            fallback.autoFillCard(word)
+                        }
+                    }
+                }
+            }
         } else {
-            FakeAiCardAutoFillService()
+            fallback
         }
     }
 

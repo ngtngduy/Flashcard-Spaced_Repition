@@ -5,6 +5,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.uth.memora.core.model.StudyMode
 import com.uth.memora.memoraViewModelFactory
 
 /**
@@ -14,7 +15,7 @@ import com.uth.memora.memoraViewModelFactory
 @Composable
 fun DeckDetailRoute(
     deckId: String,
-    onStartStudy: (String) -> Unit,
+    onStartStudy: (String, StudyMode) -> Unit,
     onAddCard: (String) -> Unit,
     onEditCard: (String, String) -> Unit,
     onBack: () -> Unit,
@@ -36,7 +37,14 @@ fun DeckDetailRoute(
     DeckDetailScreen(
         uiState = uiState,
         onBack = onBack,
-        onStartStudy = { onStartStudy(deckId) },
+        onStartStudy = {
+            val targetMode = if (uiState.dueCardsCount == 0 && uiState.newCardsCount > 0) {
+                StudyMode.NEW_CARDS
+            } else {
+                StudyMode.DUE_REVIEW
+            }
+            onStartStudy(deckId, targetMode)
+        },
         onAddCard = { onAddCard(deckId) },
         onEditCard = { card -> onEditCard(deckId, card.id) },
         onRequestDeleteCard = viewModel::requestDeleteCard,
