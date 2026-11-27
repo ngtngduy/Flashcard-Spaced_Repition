@@ -9,6 +9,7 @@ import com.google.firebase.auth.FirebaseAuthInvalidUserException
 import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.FirebaseAuthWeakPasswordException
 import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.uth.memora.core.domain.AuthRepository
 import com.uth.memora.core.model.UserAccount
@@ -119,11 +120,30 @@ class FirebaseAuthRepository(
         }
     }
 
+    /**
+     * Đăng nhập bằng tài khoản Google từ `idToken` do [GoogleSignInHelper] lấy qua Credential Manager (Mục 6.2).
+     */
+    override suspend fun signInWithGoogle(idToken: String): Result<UserAccount> {
+        val cleanToken = idToken.trim()
+        if (cleanToken.isEmpty()) {
+            return Result.failure(IllegalArgumentException(ERROR_INVALID_GOOGLE_TOKEN_VI))
+        }
+
+        return try {
+            val credential = GoogleAuthProvider.getCredential(cleanToken, null)
+            val authResult = auth.signInWithCredential(credential).await()
+            val firebaseUser = authResult.user
+                ?: return Result.failure(IllegalStateException(ERROR_GOOGLE_SIGN_IN_UNKNOWN_VI))
+            Result.success(firebaseUser.toUserAccount())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(mapGoogleSignInException(e))
+        }
+    }
+
     // Các phương thức dưới đây sẽ được hiện thực ở bước tiếp theo của nhánh m3/auth (Mục 6.2)
     override suspend fun sendPasswordResetEmail(email: String): Result<Unit> =
-        Result.failure(UnsupportedOperationException(ERROR_NOT_IMPLEMENTED_YET_VI))
-
-    override suspend fun signInWithGoogle(idToken: String): Result<UserAccount> =
         Result.failure(UnsupportedOperationException(ERROR_NOT_IMPLEMENTED_YET_VI))
 
     override suspend fun signInAnonymously(): Result<UserAccount> =
@@ -167,10 +187,20 @@ class FirebaseAuthRepository(
             "Không có kết nối mạng hoặc đường truyền không ổn định. Vui lòng kiểm tra mạng và thử lại."
         const val ERROR_OPERATION_NOT_ALLOWED_VI: String =
             "Phương thức xác thực bằng email hiện chưa được bật trên hệ thống."
+        const val ERROR_GOOGLE_OPERATION_NOT_ALLOWED_VI: String =
+            "Phương thức đăng nhập bằng Google hiện chưa được bật trên hệ thống."
+        const val ERROR_INVALID_GOOGLE_TOKEN_VI: String =
+            "Phiên xác thực Google không hợp lệ hoặc đã hết hạn. Vui lòng thử lại."
+        const val ERROR_ACCOUNT_EXISTS_DIFFERENT_CREDENTIAL_VI: String =
+            "Email này đã được đăng ký bằng phương thức khác. Vui lòng đăng nhập bằng email và mật khẩu."
+        const val ERROR_USER_DISABLED_VI: String =
+            "Tài khoản này đã bị vô hiệu hóa. Vui lòng liên hệ hỗ trợ."
         const val ERROR_SIGN_IN_UNKNOWN_VI: String =
             "Không thể đăng nhập lúc này. Vui lòng thử lại sau."
         const val ERROR_REGISTER_UNKNOWN_VI: String =
             "Không thể tạo tài khoản lúc này. Vui lòng thử lại sau."
+        const val ERROR_GOOGLE_SIGN_IN_UNKNOWN_VI: String =
+            "Không thể đăng nhập bằng Google lúc này. Vui lòng thử lại sau."
 
         private const val ERROR_NOT_IMPLEMENTED_YET_VI: String =
             "Chức năng xác thực này chưa được kích hoạt."
@@ -269,6 +299,67 @@ class FirebaseAuthRepository(
                     throwable = throwable,
                     treatInvalidLoginAsGenericCredentials = false,
                     fallbackMessage = ERROR_REGISTER_UNKNOWN_VI
+                )
+            }
+        }
+
+        /**
+         * Chuẩn hóa lỗi đăng nhập Google sang thông báo tiếng Việt thân thiện (Mục 6.2).
+         */
+        internal fun mapGoogleSignInException(throwable: Throwable): Exception {
+            return when (throwable) {
+                is FirebaseAuthUserCollisionException -> {
+                    Exception(ERROR_ACCOUNT_EXISTS_DIFFERENT_CREDENTIAL_VI, throwable)
+                }
+
+                is FirebaseAuthInvalidCredentialsException -> {
+                    Exception(ERROR_INVALID_GOOGLE_TOKEN_VI, throwable)
+                }
+
+                is FirebaseAuthInvalidUserException -> {
+                    Exception(ERROR_USER_DISABLED_VI, throwable)
+                }
+
+                is FirebaseTooManyRequestsException -> {
+                    Exception(ERROR_TOO_MANY_REQUESTS_VI, throwable)
+                }
+
+                is FirebaseNetworkException -> {
+                    Exception(ERROR_NETWORK_VI, throwable)
+                }
+
+                is FirebaseAuthException -> {
+                    when (throwable.errorCode) {
+                        "ERROR_ACCOUNT_EXISTS_WITH_DIFFERENT_CREDENTIAL" ->
+                            Exception(ERROR_ACCOUNT_EXISTS_DIFFERENT_CREDENTIAL_VI, throwable)
+
+                        "ERROR_INVALID_CREDENTIAL" ->
+                            Exception(ERROR_INVALID_GOOGLE_TOKEN_VI, throwable)
+
+                        "ERROR_USER_DISABLED" ->
+                            Exception(ERROR_USER_DISABLED_VI, throwable)
+
+                        "ERROR_OPERATION_NOT_ALLOWED" ->
+                            Exception(ERROR_GOOGLE_OPERATION_NOT_ALLOWED_VI, throwable)
+
+                        "ERROR_TOO_MANY_REQUESTS" ->
+                            Exception(ERROR_TOO_MANY_REQUESTS_VI, throwable)
+
+                        "ERROR_NETWORK_REQUEST_FAILED" ->
+                            Exception(ERROR_NETWORK_VI, throwable)
+
+                        else -> mapGenericAuthException(
+                            throwable = throwable,
+                            treatInvalidLoginAsGenericCredentials = false,
+                            fallbackMessage = ERROR_GOOGLE_SIGN_IN_UNKNOWN_VI
+                        )
+                    }
+                }
+
+                else -> mapGenericAuthException(
+                    throwable = throwable,
+                    treatInvalidLoginAsGenericCredentials = false,
+                    fallbackMessage = ERROR_GOOGLE_SIGN_IN_UNKNOWN_VI
                 )
             }
         }
