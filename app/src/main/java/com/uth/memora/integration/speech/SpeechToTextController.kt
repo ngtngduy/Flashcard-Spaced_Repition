@@ -60,8 +60,15 @@ class SpeechToTextController(context: Context) {
     private val _state = MutableStateFlow<SpeechUiState>(SpeechUiState.Idle)
     val state: StateFlow<SpeechUiState> = _state.asStateFlow()
 
+    // Khả năng hỗ trợ SpeechRecognizer trên thiết bị/máy ảo (Mục 6.7 & 9.5)
+    private val _isAvailable = MutableStateFlow(isSpeechRecognitionAvailable(appContext))
+    val isAvailable: StateFlow<Boolean> = _isAvailable.asStateFlow()
+
     @Volatile
     private var isDestroyed: Boolean = false
+
+    @Volatile
+    private var initializationFailed: Boolean = false
 
     // Các biến dưới đây chỉ được đọc/ghi trên Main Thread
     private var speechRecognizer: SpeechRecognizer? = null
@@ -160,8 +167,8 @@ class SpeechToTextController(context: Context) {
             return
         }
 
-        // Kiểm tra thiết bị có dịch vụ nhận diện giọng nói hay không (Mục 9.5)
-        if (!SpeechRecognizer.isRecognitionAvailable(appContext)) {
+        // Kiểm tra thiết bị/máy ảo có dịch vụ nhận diện giọng nói khả dụng hay không (Mục 6.7 & 9.5)
+        if (!refreshAvailability()) {
             _state.value = SpeechUiState.Error(ERROR_NOT_AVAILABLE_VI)
             return
         }
@@ -236,6 +243,22 @@ class SpeechToTextController(context: Context) {
     }
 
     /**
+     * Kiểm tra lại khả năng nhận diện giọng nói của thiết bị (an toàn trên máy ảo không có Google App - Mục 6.7 & 9.5).
+     */
+    fun refreshAvailability(): Boolean {
+        val available = !initializationFailed && isSpeechRecognitionAvailable(appContext)
+        _isAvailable.value = available
+        if (!available && !isDestroyed) {
+            runOnMainThread {
+                if (isSessionActive) {
+                    speechRecognizer?.let(::cancelSilently)
+                }
+            }
+        }
+        return available
+    }
+
+    /**
      * Giải phóng hoàn toàn [SpeechRecognizer] và listener để tránh memory leak (Mục 6.7).
      * Nên gọi trong `DisposableEffect.onDispose` hoặc `ViewModel.onCleared`.
      */
@@ -261,7 +284,10 @@ class SpeechToTextController(context: Context) {
             }.also {
                 speechRecognizer = it
             }
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
+            // Máy ảo thiếu Google App hoặc ROM lỗi dịch vụ -> ẩn nút Micro duyên dáng thay vì crash (Mục 6.7 & 9.5)
+            initializationFailed = true
+            _isAvailable.value = false
             _state.value = SpeechUiState.Error(ERROR_NOT_AVAILABLE_VI)
             null
         }
@@ -353,6 +379,14 @@ class SpeechToTextController(context: Context) {
             "Thiết bị chưa sẵn sàng nhận diện tiếng Anh (en-US). Vui lòng kiểm tra mạng hoặc gói ngôn ngữ."
         const val ERROR_UNKNOWN_VI: String =
             "Không thể nhận diện giọng nói lúc này. Vui lòng thử lại hoặc nhập bằng bàn phím."
+
+        /**
+         * Kiểm tra an toàn thiết bị/máy ảo có hỗ trợ [SpeechRecognizer] hay không (Mục 6.7 & 9.5).
+         * Trả `false` nếu máy ảo không có Google App / RecognitionService hoặc hệ thống ném ngoại lệ.
+         */
+        fun isSpeechRecognitionAvailable(context: Context): Boolean = runCatching {
+            SpeechRecognizer.isRecognitionAvailable(context.applicationContext)
+        }.getOrDefault(false)
 
         /**
          * Đánh giá kết quả nhận diện có độ tin cậy thấp hay không dựa trên [SpeechRecognizer.CONFIDENCE_SCORES] (Mục 6.7).
