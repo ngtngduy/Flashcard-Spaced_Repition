@@ -38,14 +38,17 @@ import java.io.IOException
  * - `users/{uid}/reviewLogs/{id}`
  * - `users/{uid}/practiceSentences/{id}`
  *
- * Hiện thực đồng bộ 2 chiều (Push & Pull) cho cả 4 bảng `Deck`, `Card`, `ReviewLog` và
- * `PracticeSentence`:
+ * Hiện thực đồng bộ 2 chiều (Pull → Push → Dọn xóa mềm 30 ngày) cho cả 4 bảng `Deck`, `Card`,
+ * `ReviewLog` và `PracticeSentence`:
+ * - Pull (Last-Write-Wins): đọc mốc `lastSyncedAtMillis` (mặc định `0L`), truy vấn thay đổi mới hơn
+ *   từ Firestore (`whereGreaterThan("updatedAtMillis", lastSyncedAtMillis)`), chỉ ghi đè vào Room khi
+ *   chưa có bản cục bộ, hoặc `remote.updatedAtMillis > local.updatedAtMillis`, hoặc bản cục bộ đã
+ *   `SYNCED`; giữ nguyên `isDeleted = true` nếu bản thắng là bản xóa mềm.
  * - Push: đẩy theo lô (`WriteBatch` tối đa 450 bản ghi/lô với `SetOptions.merge()`) các bản ghi
- *   `syncStatus == PENDING_SYNC`, sau đó cập nhật `SyncStatus.SYNCED` trong Room mà vẫn giữ
- *   nguyên `updatedAtMillis` gốc để bảo toàn Last-Write-Wins.
- * - Pull: đọc mốc `lastSyncedAtMillis` (mặc định `0L`), truy vấn thay đổi mới hơn từ Firestore
- *   (`whereGreaterThan("updatedAtMillis", lastSyncedAtMillis)`), áp dụng vào Room theo quy tắc
- *   Last-Write-Wins rồi cập nhật `lastSyncedAtMillis` sau khi hoàn tất.
+ *   còn `syncStatus == PENDING_SYNC` (bao gồm các bản cục bộ thắng LWW), sau đó cập nhật `SYNCED`
+ *   trong Room mà vẫn giữ nguyên `updatedAtMillis` gốc.
+ * - Dọn rác 30 ngày (Mục 10.1): sau khi đồng bộ xong, xóa vĩnh viễn khỏi Room các bản ghi xóa mềm
+ *   (`isDeleted == true && syncStatus == SYNCED`) có `updatedAtMillis` cũ hơn 30 ngày.
  * - Tài khoản Khách (`isAnonymous == true`) được bỏ qua push/pull cho đến khi đăng nhập tài khoản chính thức.
  */
 class FirestoreCloudSyncManager(
@@ -62,17 +65,20 @@ class FirestoreCloudSyncManager(
     private val syncMutex = Mutex()
 
     /**
-     * Đồng bộ 2 chiều (Push + Pull) dữ liệu học tập của tài khoản chính thức với Cloud Firestore (Mục 8.3 & Mục 10.1).
+     * Đồng bộ 2 chiều (Pull → Push → Dọn xóa mềm 30 ngày) dữ liệu học tập của tài khoản chính thức
+     * với Cloud Firestore (Mục 8.3 & Mục 10.1).
      *
-     * Thứ tự thực hiện:
+     * Thứ tự thực hiện (Pull trước Push để giải quyết xung đột Last-Write-Wins chính xác, tránh đẩy bản cũ đè bản mới trên server):
      * 1. Nếu chưa đăng nhập hoặc đang ở chế độ Khách (`isAnonymous == true`) -> bỏ qua push/pull, trả `Result.success(0)`.
      * 2. Đọc mốc `lastSyncedAtMillis` từ DataStore (mặc định `0L` cho lần đầu đăng nhập trên thiết bị mới).
-     * 3. Push toàn bộ bản ghi `PENDING_SYNC` theo thứ tự: `Deck` -> `Card` -> `ReviewLog` -> `PracticeSentence`.
-     * 4. Pull toàn bộ thay đổi mới hơn `lastSyncedAtMillis` từ Firestore về Room theo đúng thứ tự khóa ngoại
-     *    `Deck` -> `Card` -> `ReviewLog` -> `PracticeSentence` (kèm bảo vệ Last-Write-Wins).
-     * 5. Lưu mốc `lastSyncedAtMillis = now` vào `UserPreferencesRepository` sau khi cả Push và Pull thành công.
+     * 3. Pull thay đổi mới hơn `lastSyncedAtMillis` từ Firestore về Room theo thứ tự khóa ngoại
+     *    `Deck` -> `Card` -> `ReviewLog` -> `PracticeSentence`, áp dụng Last-Write-Wins.
+     * 4. Push các bản ghi vẫn còn `PENDING_SYNC` (bản mới tạo hoặc bản cục bộ thắng LWW) theo thứ tự
+     *    `Deck` -> `Card` -> `ReviewLog` -> `PracticeSentence`.
+     * 5. Dọn vĩnh viễn khỏi Room các bản ghi xóa mềm đã đồng bộ quá 30 ngày (Mục 10.1).
+     * 6. Lưu mốc `lastSyncedAtMillis = now` vào `UserPreferencesRepository` sau khi hoàn tất.
      *
-     * @return [Result.success] kèm tổng số bản ghi đã đẩy và tải về thành công, hoặc [Result.failure] với thông báo tiếng Việt.
+     * @return [Result.success] kèm tổng số bản ghi đã tải về và đẩy lên thành công, hoặc [Result.failure] với thông báo tiếng Việt.
      */
     override suspend fun syncPendingChanges(): Result<Int> = syncMutex.withLock {
         withContext(ioDispatcher) {
@@ -85,17 +91,7 @@ class FirestoreCloudSyncManager(
                     .getUserPreferences()
                     .lastSyncedAtMillis ?: 0L
 
-                // 1. Push thay đổi cục bộ theo thứ tự tham chiếu: Deck -> Card -> ReviewLog -> PracticeSentence (Mục 8.3 & 10.1)
-                val pushedDecksCount = pushPendingDecks(uid)
-                val pushedCardsCount = pushPendingCards(uid)
-                val pushedReviewLogsCount = pushPendingReviewLogs(uid)
-                val pushedPracticeSentencesCount = pushPendingPracticeSentences(uid)
-                val totalPushedCount = pushedDecksCount +
-                    pushedCardsCount +
-                    pushedReviewLogsCount +
-                    pushedPracticeSentencesCount
-
-                // 2. Pull thay đổi từ Firestore về Room theo thứ tự khóa ngoại (Mục 8.3 & 10.1)
+                // 1. Pull trước để so sánh Last-Write-Wins với bản cục bộ trước khi đẩy lên (Mục 8.3 & 10.1)
                 val pulledDecksCount = pullRemoteDecks(uid, lastSyncedAtMillis)
                 val pulledCardsCount = pullRemoteCards(uid, lastSyncedAtMillis)
                 val pulledReviewLogsCount = pullRemoteReviewLogs(uid, lastSyncedAtMillis)
@@ -105,11 +101,24 @@ class FirestoreCloudSyncManager(
                     pulledReviewLogsCount +
                     pulledPracticeSentencesCount
 
-                // 3. Ghi nhận mốc đồng bộ mới nhất sau khi hoàn tất cả Push & Pull (Mục 10.1 & 13)
+                // 2. Push các thay đổi cục bộ còn PENDING_SYNC (gồm bản cục bộ thắng LWW) theo thứ tự tham chiếu (Mục 8.3 & 10.1)
+                val pushedDecksCount = pushPendingDecks(uid)
+                val pushedCardsCount = pushPendingCards(uid)
+                val pushedReviewLogsCount = pushPendingReviewLogs(uid)
+                val pushedPracticeSentencesCount = pushPendingPracticeSentences(uid)
+                val totalPushedCount = pushedDecksCount +
+                    pushedCardsCount +
+                    pushedReviewLogsCount +
+                    pushedPracticeSentencesCount
+
+                // 3. Dọn vĩnh viễn bản ghi xóa mềm đã SYNCED cũ hơn 30 ngày khỏi Room (Mục 10.1)
                 val now = nowProvider()
+                purgeExpiredSoftDeletedRecords(now)
+
+                // 4. Ghi nhận mốc đồng bộ mới nhất sau khi hoàn tất cả Pull, Push & Dọn rác (Mục 10.1 & 13)
                 userPreferencesRepository.setLastSyncedAtMillis(now)
 
-                Result.success(totalPushedCount + totalPulledCount)
+                Result.success(totalPulledCount + totalPushedCount)
             } catch (e: CancellationException) {
                 // Không nuốt tín hiệu hủy coroutine có chủ đích từ ViewModel / Worker
                 throw e
@@ -269,8 +278,17 @@ class FirestoreCloudSyncManager(
             val decksToUpsert = ArrayList<Deck>(remoteDecks.size)
             for (remoteDeck in remoteDecks) {
                 val localDeck = deckDao.getDeckByIdIncludingDeleted(remoteDeck.id)
-                if (localDeck == null || remoteDeck.updatedAtMillis > localDeck.updatedAtMillis) {
-                    decksToUpsert.add(remoteDeck)
+                val remoteWins = shouldApplyRemoteRecord(
+                    localUpdatedAtMillis = localDeck?.updatedAtMillis,
+                    localSyncStatus = localDeck?.syncStatus,
+                    remoteUpdatedAtMillis = remoteDeck.updatedAtMillis
+                )
+                if (remoteWins) {
+                    // Giữ nguyên trạng thái xóa mềm isDeleted = true nếu bản thắng có isDeleted = true (Mục 10.1)
+                    val candidateEntity = remoteDeck.toEntity()
+                    if (localDeck == null || candidateEntity != localDeck) {
+                        decksToUpsert.add(remoteDeck)
+                    }
                 }
             }
             if (decksToUpsert.isNotEmpty()) {
@@ -284,8 +302,8 @@ class FirestoreCloudSyncManager(
 
     /**
      * Kéo các [Card] có `updatedAtMillis > lastSyncedAtMillis` từ `users/{uid}/cards` về Room (Mục 7.1, 8.3 & 10.1).
-     * Bảo đảm bộ từ cha (`deckId`) tồn tại trước khi chèn để không vi phạm khóa ngoại, đồng thời giữ lại
-     * `localImagePath` cục bộ nếu `cloudImageUrl` không đổi.
+     * Bảo đảm bộ từ cha (`deckId`) tồn tại trước khi chèn để không vi phạm khóa ngoại, áp dụng Last-Write-Wins
+     * (bảo toàn `isDeleted = true` nếu bản thắng là bản xóa mềm) và giữ lại `localImagePath` cục bộ nếu `cloudImageUrl` không đổi.
      */
     internal suspend fun pullRemoteCards(uid: String, lastSyncedAtMillis: Long): Int {
         val snapshot = userDocument(uid)
@@ -321,7 +339,12 @@ class FirestoreCloudSyncManager(
                     continue
                 }
                 val localCard = cardDao.getCardByIdIncludingDeleted(remoteCard.id)
-                if (localCard == null || remoteCard.updatedAtMillis > localCard.updatedAtMillis) {
+                val remoteWins = shouldApplyRemoteRecord(
+                    localUpdatedAtMillis = localCard?.updatedAtMillis,
+                    localSyncStatus = localCard?.syncStatus,
+                    remoteUpdatedAtMillis = remoteCard.updatedAtMillis
+                )
+                if (remoteWins) {
                     // Giữ lại đường dẫn ảnh cục bộ trên máy này nếu ảnh đám mây không thay đổi (Mục 10.1)
                     val preservedLocalImagePath = if (
                         localCard != null &&
@@ -331,7 +354,11 @@ class FirestoreCloudSyncManager(
                     } else {
                         null
                     }
-                    cardsToUpsert.add(remoteCard.copy(localImagePath = preservedLocalImagePath))
+                    // Giữ nguyên trạng thái xóa mềm isDeleted = true nếu bản thắng có isDeleted = true (Mục 10.1)
+                    val resolvedCard = remoteCard.copy(localImagePath = preservedLocalImagePath)
+                    if (localCard == null || resolvedCard.toEntity() != localCard) {
+                        cardsToUpsert.add(resolvedCard)
+                    }
                 }
             }
             if (cardsToUpsert.isNotEmpty()) {
@@ -366,16 +393,19 @@ class FirestoreCloudSyncManager(
             val logsToUpsert = ArrayList<ReviewLog>(remoteLogs.size)
             for (remoteLog in remoteLogs) {
                 val localLog = reviewLogDao.getLogById(remoteLog.id)
-                if (localLog == null) {
-                    logsToUpsert.add(remoteLog)
-                    continue
-                }
                 val remoteTimestamp = maxOf(remoteLog.updatedAtMillis, remoteLog.reviewedAtMillis)
-                val localTimestamp = maxOf(localLog.updatedAtMillis, localLog.reviewedAtMillis)
-                val shouldApplyUndo = remoteLog.isUndone &&
+                val localTimestamp = localLog?.let { maxOf(it.updatedAtMillis, it.reviewedAtMillis) }
+                val shouldApplyUndo = localLog != null &&
+                    remoteLog.isUndone &&
                     !localLog.isUndone &&
-                    remoteTimestamp >= localTimestamp
-                if (remoteTimestamp > localTimestamp || shouldApplyUndo) {
+                    remoteTimestamp >= (localTimestamp ?: 0L)
+                val remoteWins = shouldApplyRemoteRecord(
+                    localUpdatedAtMillis = localTimestamp,
+                    localSyncStatus = localLog?.syncStatus,
+                    remoteUpdatedAtMillis = remoteTimestamp
+                ) || shouldApplyUndo
+
+                if (remoteWins && (localLog == null || remoteLog.toEntity() != localLog)) {
                     logsToUpsert.add(remoteLog)
                 }
             }
@@ -410,10 +440,12 @@ class FirestoreCloudSyncManager(
             val sentencesToUpsert = ArrayList<PracticeSentence>(remoteSentences.size)
             for (remoteSentence in remoteSentences) {
                 val localSentence = practiceSentenceDao.getSentenceById(remoteSentence.id)
-                if (
-                    localSentence == null ||
-                    remoteSentence.updatedAtMillis > localSentence.updatedAtMillis
-                ) {
+                val remoteWins = shouldApplyRemoteRecord(
+                    localUpdatedAtMillis = localSentence?.updatedAtMillis,
+                    localSyncStatus = localSentence?.syncStatus,
+                    remoteUpdatedAtMillis = remoteSentence.updatedAtMillis
+                )
+                if (remoteWins && (localSentence == null || remoteSentence.toEntity() != localSentence)) {
                     sentencesToUpsert.add(remoteSentence)
                 }
             }
@@ -424,6 +456,19 @@ class FirestoreCloudSyncManager(
         }
 
         return appliedCount
+    }
+
+    /**
+     * Dọn vĩnh viễn khỏi Room các bản ghi đã xóa mềm (`isDeleted == true && syncStatus == SYNCED`)
+     * có `updatedAtMillis` cũ hơn 30 ngày sau khi hoàn tất đồng bộ (Mục 10.1).
+     * Xóa bảng con `cards` trước rồi mới xóa bảng cha `decks` trong cùng transaction.
+     */
+    internal suspend fun purgeExpiredSoftDeletedRecords(nowMillis: Long = nowProvider()) {
+        val cutoffMillis = (nowMillis - SOFT_DELETE_RETENTION_MILLIS).coerceAtLeast(0L)
+        database.withTransaction {
+            database.cardDao().purgeSyncedDeletedBefore(cutoffMillis)
+            database.deckDao().purgeSyncedDeletedBefore(cutoffMillis)
+        }
     }
 
     /**
@@ -568,6 +613,27 @@ class FirestoreCloudSyncManager(
          * Ngưỡng ghi an toàn cho mỗi `WriteBatch` Firestore (giới hạn tối đa của Firestore là 500 thao tác/lô) (Mục 10.1).
          */
         const val MAX_FIRESTORE_BATCH_SIZE: Int = 450
+
+        /** Thời hạn giữ bản ghi xóa mềm đã đồng bộ trong Room trước khi dọn vĩnh viễn: 30 ngày (Mục 10.1). */
+        const val SOFT_DELETE_RETENTION_DAYS: Long = 30L
+        const val SOFT_DELETE_RETENTION_MILLIS: Long =
+            SOFT_DELETE_RETENTION_DAYS * 24L * 60L * 60L * 1000L
+
+        /**
+         * Quyết định Last-Write-Wins khi ghi đè bản ghi từ Firestore vào Room (Mục 8.3 & Mục 10.1):
+         * - Chưa có bản cục bộ (`localUpdatedAtMillis == null`) -> ghi bản đám mây.
+         * - Có bản cục bộ -> chỉ ghi đè khi `remoteUpdatedAtMillis > localUpdatedAtMillis`
+         *   hoặc bản cục bộ đã ở trạng thái `SyncStatus.SYNCED` (không có thay đổi cục bộ chưa đẩy).
+         */
+        internal fun shouldApplyRemoteRecord(
+            localUpdatedAtMillis: Long?,
+            localSyncStatus: SyncStatus?,
+            remoteUpdatedAtMillis: Long
+        ): Boolean {
+            if (localUpdatedAtMillis == null || localSyncStatus == null) return true
+            return remoteUpdatedAtMillis > localUpdatedAtMillis ||
+                localSyncStatus == SyncStatus.SYNCED
+        }
 
         const val ERROR_NOT_AUTHENTICATED_VI: String =
             "Vui lòng đăng nhập tài khoản để đồng bộ dữ liệu lên đám mây."
