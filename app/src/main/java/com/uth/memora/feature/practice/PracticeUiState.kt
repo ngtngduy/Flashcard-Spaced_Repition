@@ -103,9 +103,10 @@ data class PracticeUiState(
     val isQuotaExhausted: Boolean
         get() = remainingDailyQuota <= 0
 
-    /** Nút Gửi sáng khi còn hạn mức hôm nay, câu hợp lệ cục bộ, không đang gửi và không trùng câu đang chờ/đang chấm (Mục 4, 6.7, 6.8 & 11). */
+    /** Nút Gửi chỉ sáng khi đã đăng nhập, còn hạn mức hôm nay, câu hợp lệ cục bộ, không đang gửi và không trùng câu đang chờ/đang chấm (Mục 4, 6.7, 6.8 & 11). */
     val canSubmit: Boolean
-        get() = !isQuotaExhausted &&
+        get() = !isGuest &&
+            !isQuotaExhausted &&
             selectedCard != null &&
             isInputValid &&
             !isSubmitting &&

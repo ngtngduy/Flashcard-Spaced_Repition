@@ -1,7 +1,6 @@
 package com.uth.memora.integration.ai
 
 import android.util.Log
-import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.GoogleGenerativeAIException
 import com.uth.memora.BuildConfig
 import com.uth.memora.core.domain.AiCardAutoFillService
@@ -174,14 +173,6 @@ class GeminiCardAutoFillService internal constructor(
         generateRawText = null
     )
 
-    private val jsonModel: GenerativeModel by lazy {
-        modelProvider.createModel(
-            generationConfig = modelProvider.createGenerationConfig(
-                responseMimeType = GeminiModelProvider.JSON_MIME_TYPE
-            )
-        )
-    }
-
     override suspend fun autoFillCard(word: String): Result<AutoFillCardData> {
         // Kiểm tra từ đầu vào và API key trước khi tạo kết nối mạng (Mục 6.3 & 9.5)
         val cleanWord = word.trim()
@@ -201,7 +192,7 @@ class GeminiCardAutoFillService internal constructor(
                     if (customGenerator != null) {
                         customGenerator(prompt)
                     } else {
-                        jsonModel.generateContent(prompt).text
+                        modelProvider.generateJsonContent(prompt)
                     }
                 }
             }
@@ -244,8 +235,8 @@ class GeminiCardAutoFillService internal constructor(
     companion object {
         private const val LOG_TAG: String = "GeminiCardAutoFill"
 
-        /** Thời gian chờ tối đa 10 giây cho gợi ý tự điền thẻ bằng AI (Mục 11). */
-        const val REQUEST_TIMEOUT_MILLIS: Long = 10_000L
+        /** Thời gian chờ tối đa 25 giây cho gợi ý tự điền thẻ bằng AI (Mục 11). */
+        const val REQUEST_TIMEOUT_MILLIS: Long = 25_000L
 
         /**
          * Phân loại ngoại lệ phát sinh trong quá trình gọi Gemini AI sang [AiAutoFillException]

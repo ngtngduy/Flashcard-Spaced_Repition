@@ -365,6 +365,12 @@ class PracticeViewModel(
         val state = _uiState.value
         if (state.isSubmitting) return
 
+        // Chặn gửi khi chưa đăng nhập tài khoản thật (Mục 6.7 & 9.5)
+        if (state.isGuest) {
+            _uiState.update { it.copy(errorMessage = ERROR_LOGIN_REQUIRED_VI) }
+            return
+        }
+
         val targetCard = state.selectedCard
         if (targetCard == null) {
             _uiState.update {
@@ -471,6 +477,11 @@ class PracticeViewModel(
     fun retryFailedSentence(sentenceId: String, isOnline: Boolean = isOnlineProvider()) {
         val state = _uiState.value
         if (sentenceId.isBlank() || state.retryingSentenceId != null || state.isSubmitting) return
+
+        if (state.isGuest) {
+            _uiState.update { it.copy(errorMessage = ERROR_LOGIN_REQUIRED_VI) }
+            return
+        }
 
         if (state.remainingDailyQuota <= 0) {
             _uiState.update {

@@ -158,7 +158,7 @@ class GeminiAiGradingService internal constructor(
         timeoutMillis = timeoutMillis,
         ioDispatcher = ioDispatcher,
         generateRawText = { prompt ->
-            modelProvider.getModel().generateContent(prompt).text
+            modelProvider.generateJsonContent(prompt)
         }
     )
 
