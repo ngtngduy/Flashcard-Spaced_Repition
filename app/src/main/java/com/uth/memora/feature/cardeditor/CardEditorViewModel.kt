@@ -114,9 +114,13 @@ class CardEditorViewModel(
                 }
             }.collect { (deckOptions, remainingQuota) ->
                 _uiState.update { current ->
+                    val mostRecentDeckId = deckOptions
+                        .maxByOrNull { it.deck.updatedAtMillis }
+                        ?.deck
+                        ?.id
                     val resolvedDeckId = when {
                         deckOptions.any { it.deck.id == current.selectedDeckId } -> current.selectedDeckId
-                        deckOptions.isNotEmpty() -> deckOptions.first().deck.id
+                        mostRecentDeckId != null -> mostRecentDeckId
                         else -> current.selectedDeckId
                     }
                     current.copy(
@@ -216,6 +220,12 @@ class CardEditorViewModel(
                 localImagePath = imagePathOrUri,
                 imageError = null
             )
+        }
+    }
+
+    fun onImagePickFailed(message: String) {
+        _uiState.update {
+            it.copy(imageError = message)
         }
     }
 
@@ -568,5 +578,9 @@ class CardEditorViewModel(
                 }
             }
         }
+    }
+
+    companion object {
+        const val DEFAULT_QUICK_ADD_DECK_ID: String = "default"
     }
 }

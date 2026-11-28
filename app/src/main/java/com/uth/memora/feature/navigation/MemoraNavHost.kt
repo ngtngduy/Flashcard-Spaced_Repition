@@ -24,6 +24,7 @@ import com.uth.memora.core.model.StudyMode
 import com.uth.memora.feature.analytics.AnalyticsRoute
 import com.uth.memora.feature.auth.AuthRoute
 import com.uth.memora.feature.cardeditor.CardEditorRoute
+import com.uth.memora.feature.cardeditor.CardEditorViewModel
 import com.uth.memora.feature.decks.DeckDetailRoute
 import com.uth.memora.feature.decks.DecksRoute
 import com.uth.memora.feature.home.HomeRoute
@@ -122,7 +123,9 @@ fun MemoraApp(
                         navController.navigate(MemoraRoutes.deckDetail(deckId))
                     },
                     onNavigateToAddCard = {
-                        navController.navigate(MemoraRoutes.cardEditor("deck_everyday"))
+                        navController.navigate(
+                            MemoraRoutes.cardEditor(CardEditorViewModel.DEFAULT_QUICK_ADD_DECK_ID)
+                        )
                     },
                     onNavigateToAuth = {
                         navController.navigate(MemoraRoutes.AUTH)

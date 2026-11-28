@@ -1,7 +1,5 @@
 package com.uth.memora.feature.cardeditor
 
-import android.content.Intent
-import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -9,10 +7,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.uth.memora.memoraViewModelFactory
+import kotlinx.coroutines.launch
 
 /**
  * Điểm vào điều hướng của màn Thêm / Sửa Flashcard (Figma 2101:9).
@@ -27,6 +27,7 @@ fun CardEditorRoute(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val viewModel: CardEditorViewModel = viewModel(
         key = "card_editor_${deckId}_${cardId ?: "new"}",
         factory = memoraViewModelFactory { container ->
@@ -47,28 +48,21 @@ fun CardEditorRoute(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
+            coroutineScope.launch {
+                CardImageStorageHelper.copyAndCompressToInternalStorage(
+                    context = context,
+                    sourceUri = uri
+                ).onSuccess { savedFile ->
+                    viewModel.onImageSelected(
+                        imagePathOrUri = savedFile.absolutePath,
+                        fileSizeBytes = savedFile.length()
+                    )
+                }.onFailure { error ->
+                    viewModel.onImagePickFailed(
+                        message = error.message ?: "Không thể lưu ảnh minh họa vào bộ nhớ ứng dụng."
+                    )
+                }
             }
-            val fileSizeBytes = runCatching {
-                context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
-                    ?.use { cursor ->
-                        val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
-                        if (sizeIndex != -1 && cursor.moveToFirst() && !cursor.isNull(sizeIndex)) {
-                            cursor.getLong(sizeIndex)
-                        } else {
-                            null
-                        }
-                    }
-            }.getOrNull()
-
-            viewModel.onImageSelected(
-                imagePathOrUri = uri.toString(),
-                fileSizeBytes = fileSizeBytes
-            )
         }
     }
 
