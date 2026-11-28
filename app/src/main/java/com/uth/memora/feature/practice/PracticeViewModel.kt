@@ -303,32 +303,14 @@ class PracticeViewModel(
     }
 
     /**
-     * Cập nhật câu người học đang nhập và chạy kiểm tra cục bộ tức thì bằng [SentenceLocalValidator.validate]
-     * để hiển thị lỗi tiếng Việt ngay dưới ô nhập (Mục 6.8 & 11).
+     * Cập nhật câu người học đang nhập và xóa lỗi kiểm tra cũ;
+     * chỉ kiểm tra và báo đỏ khi người dùng bấm nút "Chấm điểm câu" (Mục 6.8 & 11).
      */
     fun onInputTextChange(newText: String) {
-        val targetCard = _uiState.value.selectedCard
-        val liveValidationError = when {
-            newText.isBlank() -> null
-            targetCard != null -> {
-                val result = SentenceLocalValidator.validate(
-                    targetWord = targetCard.word,
-                    rawSentence = newText
-                )
-                if (result.isValid) null else result.errorMessageVi
-            }
-
-            newText.trim().length > PracticeSentence.MAX_SENTENCE_LENGTH -> {
-                "Câu không được vượt quá ${PracticeSentence.MAX_SENTENCE_LENGTH} ký tự (hiện tại: ${newText.trim().length})."
-            }
-
-            else -> null
-        }
-
         _uiState.update {
             it.copy(
                 inputText = newText,
-                validationError = liveValidationError,
+                validationError = null,
                 errorMessage = null,
                 feedbackMessage = null,
                 isLowConfidenceVoiceInput = false

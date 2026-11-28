@@ -76,8 +76,7 @@ fun SentenceInput(
     val effectiveCanSubmit = canSubmit &&
         enabled &&
         !isSubmitting &&
-        !isDuplicateInFlight &&
-        validationError == null
+        !isDuplicateInFlight
 
     val trimmedLength = inputText.trim().length
     val statusLabel = when {
@@ -92,7 +91,7 @@ fun SentenceInput(
         isListening -> MaterialTheme.colorScheme.error
         isSubmitting -> MaterialTheme.colorScheme.secondary
         isDuplicateInFlight -> StatusWarning
-        trimmedLength > PracticeSentence.MAX_SENTENCE_LENGTH -> MaterialTheme.colorScheme.error
+        validationError != null && trimmedLength > PracticeSentence.MAX_SENTENCE_LENGTH -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
@@ -301,60 +300,58 @@ fun SentenceInput(
             }
         }
 
-        // Lỗi kiểm tra cục bộ tiếng Việt hoặc cảnh báo gửi trùng ngay dưới ô nhập (Mục 6.8 & 11)
-        Spacer(modifier = Modifier.height(8.dp))
-        when {
-            validationError != null -> {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ErrorOutline,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier
-                            .padding(top = 1.dp)
-                            .size(15.dp)
-                    )
-                    Text(
-                        text = validationError,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            }
-
-            isDuplicateInFlight -> {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Schedule,
-                        contentDescription = null,
-                        tint = StatusWarning,
-                        modifier = Modifier
-                            .padding(top = 1.dp)
-                            .size(15.dp)
-                    )
-                    Text(
-                        text = "Câu này đang ở trạng thái Chờ chấm hoặc Đang chấm, vui lòng không gửi trùng.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            targetWord.isNotBlank() -> {
+        // Lỗi kiểm tra cục bộ tiếng Việt (chỉ hiện đỏ sau khi bấm "Chấm điểm câu") và hướng dẫn điều kiện bên dưới (Mục 6.8 & 11)
+        if (validationError != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ErrorOutline,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier
+                        .padding(top = 1.dp)
+                        .size(15.dp)
+                )
                 Text(
-                    text = "Gợi ý: Tối thiểu ${PracticeSentence.MIN_WORDS} từ, viết hoa chữ đầu, có dấu kết câu (. ! ?) và chứa từ \"$targetWord\".",
+                    text = validationError,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+
+        if (isDuplicateInFlight) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Schedule,
+                    contentDescription = null,
+                    tint = StatusWarning,
+                    modifier = Modifier
+                        .padding(top = 1.dp)
+                        .size(15.dp)
+                )
+                Text(
+                    text = "Câu này đang ở trạng thái Chờ chấm hoặc Đang chấm, vui lòng không gửi trùng.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        } else if (targetWord.isNotBlank()) {
+            Spacer(modifier = Modifier.height(if (validationError != null) 4.dp else 8.dp))
+            Text(
+                text = "Gợi ý: Tối thiểu ${PracticeSentence.MIN_WORDS} từ, viết hoa chữ đầu, có dấu kết câu (. ! ?) và chứa từ \"$targetWord\".",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
 
         Spacer(modifier = Modifier.height(12.dp))
