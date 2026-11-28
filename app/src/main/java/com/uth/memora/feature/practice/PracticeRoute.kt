@@ -134,13 +134,13 @@ fun PracticeRoute(
         },
         onSubmitSentence = {
             speechController.reset()
-            viewModel.submitSentence(isOnline = isOnline)
+            viewModel.submitSentence(isOnline = true)
         },
         onSaveCorrectedAsExample = viewModel::saveCorrectedAsExample,
         onRetryFailedSentence = { sentenceId ->
             viewModel.retryFailedSentence(
                 sentenceId = sentenceId,
-                isOnline = isOnline
+                isOnline = true
             )
         },
         onDismissMessage = viewModel::clearMessages,
