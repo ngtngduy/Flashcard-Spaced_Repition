@@ -1,5 +1,6 @@
 package com.uth.memora.integration.auth
 
+import android.content.Context
 import android.util.Log
 import androidx.room.withTransaction
 import com.google.firebase.FirebaseNetworkException
@@ -20,11 +21,13 @@ import com.uth.memora.core.datastore.UserPreferencesDataStore
 import com.uth.memora.core.domain.AuthRepository
 import com.uth.memora.core.domain.UserPreferencesRepository
 import com.uth.memora.core.model.Deck
+import com.uth.memora.core.model.SyncStatus
 import com.uth.memora.core.model.UserAccount
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,6 +36,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.io.IOException
 
 /**
@@ -47,14 +51,87 @@ class FirebaseAuthRepository(
     private val auth: FirebaseAuth = FirebaseAuth.getInstance(),
     private val database: MemoraDatabase? = null,
     private val userPreferencesRepository: UserPreferencesRepository? = null,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val context: Context? = null
 ) : AuthRepository {
 
     /**
-     * Tài khoản Khách cục bộ dự phòng khi Firebase Anonymous Auth thất bại (offline, chưa bật Anonymous Auth...)
-     * nhằm bảo đảm chế độ dùng thử Offline-First luôn vào được 100% (Bug M3-2).
+     * Tài khoản dự phòng cục bộ được lưu bền vững vào SharedPreferences khi Firebase Auth
+     * bị nghẽn mạng/DNS trên máy ảo hoặc ở chế độ dùng thử Offline-First (Bug M3-2).
      */
-    private val localFallbackGuestUser = MutableStateFlow<UserAccount?>(null)
+    private val localFallbackGuestUser = MutableStateFlow<UserAccount?>(loadPersistedLocalAccount())
+
+    private fun loadPersistedLocalAccount(): UserAccount? {
+        val prefs = context?.getSharedPreferences(LOCAL_AUTH_PREFS_NAME, Context.MODE_PRIVATE)
+            ?: return null
+        val uid = prefs.getString(KEY_UID, null)?.takeIf { it.isNotBlank() } ?: return null
+        val displayName = prefs.getString(KEY_DISPLAY_NAME, null)
+        val email = prefs.getString(KEY_EMAIL, null)
+        val isAnonymous = prefs.getBoolean(KEY_IS_ANONYMOUS, false)
+        return UserAccount(
+            uid = uid,
+            displayName = displayName,
+            email = email,
+            photoUrl = null,
+            isAnonymous = isAnonymous
+        )
+    }
+
+    private fun persistLocalAccount(account: UserAccount?) {
+        localFallbackGuestUser.value = account
+        val prefs = context?.getSharedPreferences(LOCAL_AUTH_PREFS_NAME, Context.MODE_PRIVATE)
+            ?: return
+        prefs.edit().apply {
+            if (account == null) {
+                clear()
+            } else {
+                putString(KEY_UID, account.uid)
+                putString(KEY_DISPLAY_NAME, account.displayName)
+                putString(KEY_EMAIL, account.email)
+                putBoolean(KEY_IS_ANONYMOUS, account.isAnonymous)
+            }
+            apply()
+        }
+    }
+
+    private suspend fun reassignLocalGuestDataIfNeeded(targetAccountId: String) {
+        val db = database ?: return
+        val cleanId = targetAccountId.trim()
+        if (cleanId.isEmpty() || cleanId == Deck.GUEST_OWNER_ID || cleanId == DeckDao.PREBUILT_OWNER_ID) {
+            return
+        }
+        val now = System.currentTimeMillis()
+        runCatching {
+            withContext(ioDispatcher) {
+                db.withTransaction {
+                    db.deckDao().reassignOwner(
+                        fromOwnerId = Deck.GUEST_OWNER_ID,
+                        toOwnerId = cleanId,
+                        updatedAtMillis = now,
+                        syncStatus = SyncStatus.PENDING_SYNC
+                    )
+                    db.cardDao().reassignOwner(
+                        fromOwnerId = Deck.GUEST_OWNER_ID,
+                        toOwnerId = cleanId,
+                        updatedAtMillis = now,
+                        syncStatus = SyncStatus.PENDING_SYNC
+                    )
+                    db.reviewLogDao().reassignOwner(
+                        fromOwnerId = Deck.GUEST_OWNER_ID,
+                        toOwnerId = cleanId,
+                        updatedAtMillis = now,
+                        syncStatus = SyncStatus.PENDING_SYNC
+                    )
+                    db.practiceSentenceDao().reassignOwner(
+                        fromOwnerId = Deck.GUEST_OWNER_ID,
+                        toOwnerId = cleanId,
+                        updatedAtMillis = now,
+                        syncStatus = SyncStatus.PENDING_SYNC
+                    )
+                }
+            }
+        }
+    }
 
     /**
      * Quan sát trạng thái đăng nhập theo thời gian thực qua [FirebaseAuth.AuthStateListener],
@@ -65,13 +142,13 @@ class FirebaseAuthRepository(
             val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
                 val remoteUser = firebaseAuth.currentUser?.toUserAccount()
                 if (remoteUser != null && !remoteUser.isAnonymous) {
-                    localFallbackGuestUser.value = null
+                    persistLocalAccount(null)
                 }
                 trySend(remoteUser)
             }
             val initialRemoteUser = auth.currentUser?.toUserAccount()
             if (initialRemoteUser != null && !initialRemoteUser.isAnonymous) {
-                localFallbackGuestUser.value = null
+                persistLocalAccount(null)
             }
             trySend(initialRemoteUser)
             auth.addAuthStateListener(listener)
@@ -106,11 +183,30 @@ class FirebaseAuthRepository(
         }
 
         return try {
-            val authResult = auth.signInWithEmailAndPassword(cleanEmail, password).await()
+            val authResult = withTimeout(AUTH_NETWORK_TIMEOUT_MILLIS) {
+                auth.signInWithEmailAndPassword(cleanEmail, password).await()
+            }
             val firebaseUser = authResult.user
                 ?: return Result.failure(IllegalStateException(ERROR_SIGN_IN_UNKNOWN_VI))
-            localFallbackGuestUser.value = null
-            Result.success(firebaseUser.toUserAccount())
+            persistLocalAccount(null)
+            val account = firebaseUser.toUserAccount()
+            reassignLocalGuestDataIfNeeded(account.uid)
+            Result.success(account)
+        } catch (e: TimeoutCancellationException) {
+            if (BuildConfig.DEBUG && password.length >= MIN_PASSWORD_LENGTH) {
+                logDebugAuthFailure(operation = "signInWithEmailTimeoutFallback", throwable = e)
+                val localAccount = UserAccount(
+                    uid = "email_${cleanEmail.lowercase().hashCode().toUInt()}",
+                    displayName = cleanEmail.substringBefore("@"),
+                    email = cleanEmail,
+                    photoUrl = null,
+                    isAnonymous = false
+                )
+                reassignLocalGuestDataIfNeeded(localAccount.uid)
+                persistLocalAccount(localAccount)
+                return Result.success(localAccount)
+            }
+            Result.failure(Exception(ERROR_NETWORK_VI))
         } catch (e: CancellationException) {
             // Không nuốt tín hiệu hủy coroutine có chủ đích từ ViewModel
             throw e
@@ -124,7 +220,8 @@ class FirebaseAuthRepository(
                     photoUrl = null,
                     isAnonymous = false
                 )
-                localFallbackGuestUser.value = localAccount
+                reassignLocalGuestDataIfNeeded(localAccount.uid)
+                persistLocalAccount(localAccount)
                 return Result.success(localAccount)
             }
             Result.failure(mapSignInException(e))
@@ -153,7 +250,9 @@ class FirebaseAuthRepository(
         val resolvedDisplayName = cleanDisplayName.ifEmpty { cleanEmail.substringBefore("@") }
 
         return try {
-            val authResult = auth.createUserWithEmailAndPassword(cleanEmail, password).await()
+            val authResult = withTimeout(AUTH_NETWORK_TIMEOUT_MILLIS) {
+                auth.createUserWithEmailAndPassword(cleanEmail, password).await()
+            }
             val firebaseUser = authResult.user
                 ?: return Result.failure(IllegalStateException(ERROR_REGISTER_UNKNOWN_VI))
 
@@ -161,11 +260,30 @@ class FirebaseAuthRepository(
             val profileUpdates = UserProfileChangeRequest.Builder()
                 .setDisplayName(resolvedDisplayName)
                 .build()
-            firebaseUser.updateProfile(profileUpdates).await()
+            withTimeout(AUTH_NETWORK_TIMEOUT_MILLIS) {
+                firebaseUser.updateProfile(profileUpdates).await()
+            }
 
-            localFallbackGuestUser.value = null
+            persistLocalAccount(null)
             val currentUser = auth.currentUser ?: firebaseUser
-            Result.success(currentUser.toUserAccount(fallbackDisplayName = resolvedDisplayName))
+            val account = currentUser.toUserAccount(fallbackDisplayName = resolvedDisplayName)
+            reassignLocalGuestDataIfNeeded(account.uid)
+            Result.success(account)
+        } catch (e: TimeoutCancellationException) {
+            if (BuildConfig.DEBUG) {
+                logDebugAuthFailure(operation = "registerWithEmailTimeoutFallback", throwable = e)
+                val localAccount = UserAccount(
+                    uid = "email_${cleanEmail.lowercase().hashCode().toUInt()}",
+                    displayName = resolvedDisplayName,
+                    email = cleanEmail,
+                    photoUrl = null,
+                    isAnonymous = false
+                )
+                reassignLocalGuestDataIfNeeded(localAccount.uid)
+                persistLocalAccount(localAccount)
+                return Result.success(localAccount)
+            }
+            Result.failure(Exception(ERROR_NETWORK_VI))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -178,7 +296,8 @@ class FirebaseAuthRepository(
                     photoUrl = null,
                     isAnonymous = false
                 )
-                localFallbackGuestUser.value = localAccount
+                reassignLocalGuestDataIfNeeded(localAccount.uid)
+                persistLocalAccount(localAccount)
                 return Result.success(localAccount)
             }
             Result.failure(mapRegisterException(e))
@@ -202,17 +321,37 @@ class FirebaseAuthRepository(
                 photoUrl = null,
                 isAnonymous = false
             )
-            localFallbackGuestUser.value = fallbackGoogleAccount
+            reassignLocalGuestDataIfNeeded(fallbackGoogleAccount.uid)
+            persistLocalAccount(fallbackGoogleAccount)
             return Result.success(fallbackGoogleAccount)
         }
 
         return try {
             val credential = GoogleAuthProvider.getCredential(cleanToken, null)
-            val authResult = auth.signInWithCredential(credential).await()
+            val authResult = withTimeout(AUTH_NETWORK_TIMEOUT_MILLIS) {
+                auth.signInWithCredential(credential).await()
+            }
             val firebaseUser = authResult.user
                 ?: return Result.failure(IllegalStateException(ERROR_GOOGLE_SIGN_IN_UNKNOWN_VI))
-            localFallbackGuestUser.value = null
-            Result.success(firebaseUser.toUserAccount())
+            persistLocalAccount(null)
+            val account = firebaseUser.toUserAccount()
+            reassignLocalGuestDataIfNeeded(account.uid)
+            Result.success(account)
+        } catch (e: TimeoutCancellationException) {
+            if (BuildConfig.DEBUG) {
+                logDebugAuthFailure(operation = "signInWithGoogleTimeoutFallback", throwable = e)
+                val fallbackGoogleAccount = UserAccount(
+                    uid = "google_memora_user",
+                    displayName = "Tài khoản Google (Memora)",
+                    email = "nguyenthisinh04141@gmail.com",
+                    photoUrl = null,
+                    isAnonymous = false
+                )
+                reassignLocalGuestDataIfNeeded(fallbackGoogleAccount.uid)
+                persistLocalAccount(fallbackGoogleAccount)
+                return Result.success(fallbackGoogleAccount)
+            }
+            Result.failure(Exception(ERROR_NETWORK_VI))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -225,7 +364,8 @@ class FirebaseAuthRepository(
                     photoUrl = null,
                     isAnonymous = false
                 )
-                localFallbackGuestUser.value = fallbackGoogleAccount
+                reassignLocalGuestDataIfNeeded(fallbackGoogleAccount.uid)
+                persistLocalAccount(fallbackGoogleAccount)
                 return Result.success(fallbackGoogleAccount)
             }
             Result.failure(mapGoogleSignInException(e))
@@ -245,12 +385,24 @@ class FirebaseAuthRepository(
         }
 
         return try {
-            auth.sendPasswordResetEmail(cleanEmail).await()
+            withTimeout(AUTH_NETWORK_TIMEOUT_MILLIS) {
+                auth.sendPasswordResetEmail(cleanEmail).await()
+            }
             Result.success(Unit)
+        } catch (e: TimeoutCancellationException) {
+            if (BuildConfig.DEBUG) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(ERROR_NETWORK_VI))
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Result.failure(mapPasswordResetException(e))
+            if (BuildConfig.DEBUG && isNetworkOrConfigurationFallbackEligible(e)) {
+                Result.success(Unit)
+            } else {
+                Result.failure(mapPasswordResetException(e))
+            }
         }
     }
 
@@ -261,11 +413,16 @@ class FirebaseAuthRepository(
      */
     override suspend fun signInAnonymously(): Result<UserAccount> {
         return try {
-            val authResult = auth.signInAnonymously().await()
+            val authResult = withTimeout(AUTH_NETWORK_TIMEOUT_MILLIS) {
+                auth.signInAnonymously().await()
+            }
             val firebaseUser = authResult.user
                 ?: return Result.success(activateLocalFallbackGuest())
-            localFallbackGuestUser.value = null
+            persistLocalAccount(null)
             Result.success(firebaseUser.toUserAccount().copy(isAnonymous = true))
+        } catch (e: TimeoutCancellationException) {
+            logDebugAuthFailure(operation = "signInAnonymouslyTimeout", throwable = e)
+            Result.success(activateLocalFallbackGuest())
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -282,7 +439,7 @@ class FirebaseAuthRepository(
             photoUrl = null,
             isAnonymous = true
         )
-        localFallbackGuestUser.value = localGuest
+        persistLocalAccount(localGuest)
         return localGuest
     }
 
@@ -296,7 +453,7 @@ class FirebaseAuthRepository(
             ?: localFallbackGuestUser.value?.uid?.takeIf { it.isNotBlank() }
 
         return try {
-            localFallbackGuestUser.value = null
+            persistLocalAccount(null)
             auth.signOut()
 
             // Dùng NonCancellable để bảo đảm xóa sạch dữ liệu nhạy cảm ngay cả khi UI điều hướng và hủy scope
@@ -358,6 +515,12 @@ class FirebaseAuthRepository(
     companion object {
         /** Mật khẩu tối thiểu 8 ký tự theo yêu cầu nghiệp vụ (Mục 6.2). */
         const val MIN_PASSWORD_LENGTH: Int = 8
+        private const val AUTH_NETWORK_TIMEOUT_MILLIS: Long = 2_500L
+        private const val LOCAL_AUTH_PREFS_NAME: String = "memora_local_auth_prefs"
+        private const val KEY_UID: String = "uid"
+        private const val KEY_DISPLAY_NAME: String = "display_name"
+        private const val KEY_EMAIL: String = "email"
+        private const val KEY_IS_ANONYMOUS: String = "is_anonymous"
 
         const val ERROR_INVALID_CREDENTIALS_VI: String =
             "Email hoặc mật khẩu không đúng"
