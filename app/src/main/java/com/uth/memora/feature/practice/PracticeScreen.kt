@@ -106,39 +106,32 @@ fun PracticeScreen(
         Column(modifier = Modifier.fillMaxSize()) {
             // Thanh tiêu đề tab Chatbot chuẩn Figma (Node 2061:120..122)
             PracticeTopHeader(
-                showRefreshAction = !uiState.isGuest,
+                showRefreshAction = true,
                 isRefreshing = uiState.isLoading,
                 onRefreshClick = onRefreshTargetCards
             )
 
-            // Chặn gọi AI khi đang ở chế độ Khách chưa đăng nhập Email/Google (Mục 4 & 6.7)
-            if (uiState.isGuest) {
-                PracticeGuestIntroContent(
-                    onNavigateToAuth = onNavigateToAuth,
-                    modifier = Modifier.weight(1f)
-                )
-            } else {
-                PracticeSignedInContent(
-                    uiState = uiState,
-                    isOnline = isOnline,
-                    isVoiceInputAvailable = isVoiceInputAvailable,
-                    speechState = speechState,
-                    onSelectTargetCard = onSelectTargetCard,
-                    onNextCard = onNextCard,
-                    onRefreshTargetCards = onRefreshTargetCards,
-                    onSpeakWord = onSpeakWord,
-                    onInputTextChange = onInputTextChange,
-                    onSubmitSentence = onSubmitSentence,
-                    onSaveCorrectedAsExample = onSaveCorrectedAsExample,
-                    onRetryFailedSentence = onRetryFailedSentence,
-                    onDismissMessage = onDismissMessage,
-                    onStartVoiceInput = onStartVoiceInput,
-                    onStopVoiceInput = onStopVoiceInput,
-                    voiceActionContent = voiceActionContent,
-                    resultSectionContent = resultSectionContent,
-                    modifier = Modifier.weight(1f)
-                )
-            }
+            // Hiển thị trực tiếp giao diện Luyện đặt câu với Chatbot AI cho mọi người học (cả đã đăng nhập & dùng thử)
+            PracticeSignedInContent(
+                uiState = uiState,
+                isOnline = isOnline,
+                isVoiceInputAvailable = isVoiceInputAvailable,
+                speechState = speechState,
+                onSelectTargetCard = onSelectTargetCard,
+                onNextCard = onNextCard,
+                onRefreshTargetCards = onRefreshTargetCards,
+                onSpeakWord = onSpeakWord,
+                onInputTextChange = onInputTextChange,
+                onSubmitSentence = onSubmitSentence,
+                onSaveCorrectedAsExample = onSaveCorrectedAsExample,
+                onRetryFailedSentence = onRetryFailedSentence,
+                onDismissMessage = onDismissMessage,
+                onStartVoiceInput = onStartVoiceInput,
+                onStopVoiceInput = onStopVoiceInput,
+                voiceActionContent = voiceActionContent,
+                resultSectionContent = resultSectionContent,
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }

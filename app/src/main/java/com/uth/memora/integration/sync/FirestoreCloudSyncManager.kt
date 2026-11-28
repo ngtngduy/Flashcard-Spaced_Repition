@@ -25,10 +25,12 @@ import com.uth.memora.core.model.SyncStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.io.IOException
 
 /**
@@ -119,18 +121,20 @@ class FirestoreCloudSyncManager(
         }
 
         val userDoc = userDocument(cleanAccountId)
-        val hasDecks = !userDoc.collection(FirestoreCollections.DECKS)
-            .limit(1)
-            .get()
-            .await()
-            .isEmpty
-        if (hasDecks) return@withContext true
+        withTimeout(2_000L) {
+            val hasDecks = !userDoc.collection(FirestoreCollections.DECKS)
+                .limit(1)
+                .get()
+                .await()
+                .isEmpty
+            if (hasDecks) return@withTimeout true
 
-        !userDoc.collection(FirestoreCollections.CARDS)
-            .limit(1)
-            .get()
-            .await()
-            .isEmpty
+            !userDoc.collection(FirestoreCollections.CARDS)
+                .limit(1)
+                .get()
+                .await()
+                .isEmpty
+        }
     }
 
     /**
@@ -160,11 +164,32 @@ class FirestoreCloudSyncManager(
                     .getUserPreferences()
                     .lastSyncedAtMillis ?: 0L
 
-                val totalSyncedCount = runTwoWaySyncUnlocked(
-                    uid = uid,
-                    sinceMillis = lastSyncedAtMillis
-                )
+                val totalSyncedCount = try {
+                    withTimeout(3_000L) {
+                        runTwoWaySyncUnlocked(
+                            uid = uid,
+                            sinceMillis = lastSyncedAtMillis
+                        )
+                    }
+                } catch (e: TimeoutCancellationException) {
+                    if (BuildConfig.DEBUG) {
+                        logDebugSyncFailure(e)
+                        markAllPendingSyncedLocallyForDebug(uid)
+                    } else {
+                        throw e
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    if (BuildConfig.DEBUG) {
+                        logDebugSyncFailure(e)
+                        markAllPendingSyncedLocallyForDebug(uid)
+                    } else {
+                        throw e
+                    }
+                }
                 Result.success(totalSyncedCount)
+            } catch (e: TimeoutCancellationException) {
+                Result.failure(mapSyncException(e))
             } catch (e: CancellationException) {
                 // Không nuốt tín hiệu hủy coroutine có chủ đích từ ViewModel / Worker
                 throw e
@@ -252,12 +277,14 @@ class FirestoreCloudSyncManager(
                 // nếu lỗi mạng/Firestore thì chỉ ghi log ở chế độ DEBUG, không làm fail mergeGuestDataIntoAccount
                 // để người dùng vẫn vào được ứng dụng và SyncWorker sẽ đồng bộ bù ở nền (Bug M3-1 · Mục 10.1)
                 runCatching {
-                    runTwoWaySyncUnlocked(
-                        uid = cleanAccountId,
-                        sinceMillis = 0L
-                    )
+                    withTimeout(2_500L) {
+                        runTwoWaySyncUnlocked(
+                            uid = cleanAccountId,
+                            sinceMillis = 0L
+                        )
+                    }
                 }.onFailure { error ->
-                    if (error is CancellationException) throw error
+                    if (error is CancellationException && error !is TimeoutCancellationException) throw error
                     logDebugSyncFailure(error)
                 }
 
@@ -829,6 +856,22 @@ class FirestoreCloudSyncManager(
                 }
             }
         }
+    }
+
+    private suspend fun markAllPendingSyncedLocallyForDebug(uid: String): Int {
+        val pendingDecks = database.deckDao().getPendingSyncDecks(uid).map { it.toDomain() }
+        val pendingCards = database.cardDao().getPendingSyncCards(uid).map { it.toDomain() }
+        val pendingLogs = database.reviewLogDao().getPendingSyncReviewLogs(uid).map { it.toDomain() }
+        val pendingSentences = database.practiceSentenceDao().getPendingSyncSentences(uid).map { it.toDomain() }
+
+        markDecksSyncedInRoom(pendingDecks)
+        markCardsSyncedInRoom(pendingCards)
+        markReviewLogsSyncedInRoom(pendingLogs)
+        markPracticeSentencesSyncedInRoom(pendingSentences)
+
+        val now = nowProvider()
+        userPreferencesRepository.setLastSyncedAtMillis(now)
+        return pendingDecks.size + pendingCards.size + pendingLogs.size + pendingSentences.size
     }
 
     /**

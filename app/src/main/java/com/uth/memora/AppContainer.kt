@@ -93,6 +93,7 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
         if (isFirebaseAvailable) {
             runCatching {
                 FirebaseAuthRepository(
+                    context = appContext,
                     database = database,
                     userPreferencesRepository = userPreferencesRepository
                 )

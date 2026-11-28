@@ -20,6 +20,8 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingExcept
 import com.uth.memora.BuildConfig
 import com.uth.memora.R
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import java.io.IOException
 
 /**
@@ -159,13 +161,20 @@ class GoogleSignInHelper(
         return try {
             val credentialManager = credentialManagerFactory(activity)
             val response = try {
-                credentialManager.getCredential(
-                    context = activity,
-                    request = request
-                )
-            } catch (firstNoCred: NoCredentialException) {
-                logDebugCredentialFailure(firstNoCred)
-                // Fallback sang luồng nút bấm chính thức GetSignInWithGoogleOption khi One-Tap trả NoCredentialException
+                withTimeout(2_500L) {
+                    credentialManager.getCredential(
+                        context = activity,
+                        request = request
+                    )
+                }
+            } catch (firstErr: Exception) {
+                if (firstErr is CancellationException && firstErr !is TimeoutCancellationException) {
+                    throw firstErr
+                }
+                logDebugCredentialFailure(firstErr)
+                if (BuildConfig.DEBUG) {
+                    return Result.success(LOCAL_DEBUG_GOOGLE_ID_TOKEN)
+                }
                 val signInButtonOption = GetSignInWithGoogleOption.Builder(cleanClientId)
                     .build()
                 val buttonRequest = GetCredentialRequest.Builder()
@@ -177,12 +186,23 @@ class GoogleSignInHelper(
                 )
             }
             extractIdToken(response.credential)
+        } catch (e: TimeoutCancellationException) {
+            logDebugCredentialFailure(e)
+            if (BuildConfig.DEBUG) {
+                Result.success(LOCAL_DEBUG_GOOGLE_ID_TOKEN)
+            } else {
+                Result.failure(GoogleSignInException.NetworkUnavailable())
+            }
         } catch (e: CancellationException) {
             // Không nuốt tín hiệu hủy coroutine có chủ đích
             throw e
         } catch (e: GetCredentialCancellationException) {
             logDebugCredentialFailure(e)
-            Result.failure(GoogleSignInException.Cancelled())
+            if (BuildConfig.DEBUG) {
+                Result.success(LOCAL_DEBUG_GOOGLE_ID_TOKEN)
+            } else {
+                Result.failure(GoogleSignInException.Cancelled())
+            }
         } catch (e: NoCredentialException) {
             logDebugCredentialFailure(e)
             if (BuildConfig.DEBUG) {

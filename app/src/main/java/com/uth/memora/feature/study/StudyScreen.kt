@@ -399,12 +399,12 @@ fun StudyScreen(
                             }
                         }
 
-                        // Khu vực nút đánh giá theo StudyMode
+                        // Khu vực nút đánh giá theo StudyMode (chỉ mở khóa khi đã lật thẻ xem nghĩa)
                         RatingButtons(
                             studyMode = uiState.studyMode,
                             previewLabels = uiState.previewLabels,
                             onRate = onRateCard,
-                            enabled = true
+                            enabled = uiState.isFlipped
                         )
 
                         Spacer(modifier = Modifier.height(12.dp))
